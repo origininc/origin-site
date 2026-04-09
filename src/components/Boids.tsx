@@ -178,7 +178,7 @@ type SpeciesConfig = {
   globalMergeRadius?: number;
   spawnAtCenter?: boolean;
   spawnRadius?: number;
-  color?: string;
+  opacity?: number;
   speedVarMin?: number;
   speedVarMax?: number;
 };
@@ -236,7 +236,7 @@ const LIFE_SIM_PRESET: Preset = {
     {
       id: "bone",
       ratio: 0.7,
-      color: "#fff",
+      opacity: 1.0,
       maxSpeedScale: 1.25,
       maxForceScale: 1.2,
       wAlignScale: 0.3,
@@ -268,7 +268,7 @@ const LIFE_SIM_PRESET: Preset = {
     {
       id: "head",
       ratio: 0.1,
-      color: "#fff",
+      opacity: 0.9,
       maxSpeedScale: 1.15,
       maxForceScale: 1.1,
       wAlignScale: 0.9,
@@ -287,7 +287,7 @@ const LIFE_SIM_PRESET: Preset = {
     {
       id: "wing",
       ratio: 0.2,
-      color: "#fff",
+      opacity: 0.9,
       maxSpeedScale: 1.12,
       maxForceScale: 1.15,
       wAlignScale: 1.1,
@@ -407,6 +407,30 @@ export default function Boids() {
     }
   
     return program;
+  };
+
+  const speedToRgb = (speed: number, minSpeed: number, maxSpeed: number) => {
+    const t = clamp((speed - minSpeed) / Math.max(1e-6, maxSpeed - minSpeed), 0, 1);
+  
+    const shaped = Math.pow(t, 3.8);
+  
+    let r: number;
+    let g: number;
+    let b: number;
+  
+    if (shaped < 0.5) {
+      const u = shaped / 0.5;
+      r = 0;
+      g = Math.round(255 * u);
+      b = 255;
+    } else {
+      const u = (shaped - 0.5) / 0.5;
+      r = 255;
+      g = Math.round(255 * (1 - u));
+      b = Math.round(255 * (1 - u));
+    }
+  
+    return { r, g, b };
   };
 
   const toroidalDelta = (from: Vec2, to: Vec2, W: number, H: number): Vec2 => {
@@ -1411,16 +1435,23 @@ export default function Boids() {
 
     const boids = boidsRef.current;
     const speciesList = normalizeSpecies(base);
-
-    for (let si = 0; si < speciesList.length; si++) {
-      ctx.fillStyle = speciesList[si].color ?? "#111";
-      for (let i = 0; i < boids.length; i++) {
-        if (boids[i].s !== si) continue;
-        const b = boids[i];
-        const sx = Math.round(b.p.x / pixel) * pixel;
-        const sy = Math.round(b.p.y / pixel) * pixel;
-        ctx.fillRect(sx, sy, pixel, pixel);
-      }
+    
+    for (let i = 0; i < boids.length; i++) {
+      const b = boids[i];
+      const sc = speciesList[b.s];
+    
+      const maxSpeedEff = base.maxSpeed * (sc.maxSpeedScale ?? 1) * b.speedScale;
+      const minSpeedEff = maxSpeedEff * 0.1;
+      const speed = Math.hypot(b.v.x, b.v.y);
+    
+      const { r, g, b: blue } = speedToRgb(speed, minSpeedEff, maxSpeedEff);
+      const opacity = sc.opacity ?? 1.0;
+    
+      ctx.fillStyle = `rgba(${r}, ${g}, ${blue}, ${opacity})`;
+    
+      const sx = Math.round(b.p.x / pixel) * pixel;
+      const sy = Math.round(b.p.y / pixel) * pixel;
+      ctx.fillRect(sx, sy, pixel, pixel);
     }
   };
 
@@ -1655,7 +1686,7 @@ export default function Boids() {
     
             const mouse = mouseRef.current ?? { x: w * 0.5, y: 0 };
             gl.uniform2f(asciiUniforms.mouse, mouse.x, mouse.y);
-            gl.uniform1f(asciiUniforms.pixelation, 0.75);
+            gl.uniform1f(asciiUniforms.pixelation, 0.5);
           },
           currentTexture
         );
