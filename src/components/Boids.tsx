@@ -5,12 +5,12 @@ import { useEffect, useRef, useState } from "react";
 import {
   densityResolveFrag,
   densityResolveVert,
-} from "@/components/shaders/densityResolve";
+} from "@/shaders/densityResolve";
 
 import {
-  asciiPostFrag,
-  asciiPostVert,
-} from "@/components/shaders/asciiPost";
+  embossPostFrag,
+  embossPostVert,
+} from "@/shaders/embossPost";
 
 const copyVert = `
 precision mediump float;
@@ -403,15 +403,24 @@ export default function Boids() {
   const skeletonRef = useRef<Skeleton | null>(null);
 
   const ENABLE_DENSITY = true;
-  const ENABLE_ASCII = false;
+  const ENABLE_EMBOSS = true;
   
-  const DENSITY_SCALE = 1.0;
-  const DENSITY_BLUR_RADIUS = 1.0;
-  const DENSITY_GAIN = 0.5;
-  const SPLAT_RADIUS_SCALE = 1.35;
+  const DENSITY_SCALE = 1.5;
+  const DENSITY_BLUR_RADIUS = 40.0;
+  const DENSITY_GAIN = 2.0;
+  const SPLAT_RADIUS_SCALE = 1.5;
   const SPLAT_ALPHA_SCALE = 0.55;
 
   const MONOCHROME = true;
+
+  const EMBOSS_HEIGHT_SCALE = 30.0;
+  const EMBOSS_LIGHT_X = -0.7;
+  const EMBOSS_LIGHT_Y = -0.55;
+  const EMBOSS_AMBIENT = 0.92;
+  const EMBOSS_DIFFUSE = 0.16;
+  const EMBOSS_SHADOW = 0.14;
+  const EMBOSS_SPECULAR = 0.08;
+  const EMBOSS_SPECULAR_POWER = 18.0;
 
   const rand = (min: number, max: number) => Math.random() * (max - min) + min;
 
@@ -1494,14 +1503,16 @@ export default function Boids() {
       
       radius *= SPLAT_RADIUS_SCALE;
       
-      const inner = radius * 0.08;
+      const inner = 0;
       const outer = radius;
       
       const grad = ctx.createRadialGradient(sx, sy, inner, sx, sy, outer);
-      grad.addColorStop(0.0, `rgba(${baseR}, ${baseG}, ${baseB}, ${0.12 * opacity * SPLAT_ALPHA_SCALE})`);
-      grad.addColorStop(0.28, `rgba(${baseR}, ${baseG}, ${baseB}, ${0.085 * opacity * SPLAT_ALPHA_SCALE})`);
-      grad.addColorStop(0.6, `rgba(${baseR}, ${baseG}, ${baseB}, ${0.04 * opacity * SPLAT_ALPHA_SCALE})`);
-      grad.addColorStop(1.0, `rgba(${baseR}, ${baseG}, ${baseB}, 0)`);
+      grad.addColorStop(0.0,  `rgba(${baseR}, ${baseG}, ${baseB}, ${0.10 * opacity * SPLAT_ALPHA_SCALE})`);
+      grad.addColorStop(0.15, `rgba(${baseR}, ${baseG}, ${baseB}, ${0.085 * opacity * SPLAT_ALPHA_SCALE})`);
+      grad.addColorStop(0.3,  `rgba(${baseR}, ${baseG}, ${baseB}, ${0.06 * opacity * SPLAT_ALPHA_SCALE})`);
+      grad.addColorStop(0.5,  `rgba(${baseR}, ${baseG}, ${baseB}, ${0.035 * opacity * SPLAT_ALPHA_SCALE})`);
+      grad.addColorStop(0.7,  `rgba(${baseR}, ${baseG}, ${baseB}, ${0.015 * opacity * SPLAT_ALPHA_SCALE})`);
+      grad.addColorStop(1.0,  `rgba(${baseR}, ${baseG}, ${baseB}, 0)`);
   
       ctx.fillStyle = grad;
       ctx.beginPath();
@@ -1539,10 +1550,10 @@ export default function Boids() {
       densityResolveFrag
     );
     
-    const asciiProgram = createProgram(
+    const embossProgram = createProgram(
       gl,
-      asciiPostVert,
-      asciiPostFrag
+      embossPostVert,
+      embossPostFrag
     );
   
     const quadBuffer = gl.createBuffer()!;
@@ -1671,11 +1682,17 @@ export default function Boids() {
       densityGain: gl.getUniformLocation(densityResolveProgram, "uDensityGain"),
     };
     
-    const asciiUniforms = {
-      texture: gl.getUniformLocation(asciiProgram, "uTexture"),
-      resolution: gl.getUniformLocation(asciiProgram, "uResolution"),
-      mouse: gl.getUniformLocation(asciiProgram, "uMouse"),
-      pixelation: gl.getUniformLocation(asciiProgram, "uPixelation"),
+    const embossUniforms = {
+      texture: gl.getUniformLocation(embossProgram, "uTexture"),
+      resolution: gl.getUniformLocation(embossProgram, "uResolution"),
+      heightScale: gl.getUniformLocation(embossProgram, "uHeightScale"),
+      lightDir: gl.getUniformLocation(embossProgram, "uLightDir"),
+      baseColor: gl.getUniformLocation(embossProgram, "uBaseColor"),
+      ambient: gl.getUniformLocation(embossProgram, "uAmbient"),
+      diffuse: gl.getUniformLocation(embossProgram, "uDiffuse"),
+      shadowStrength: gl.getUniformLocation(embossProgram, "uShadowStrength"),
+      specularStrength: gl.getUniformLocation(embossProgram, "uSpecularStrength"),
+      specularPower: gl.getUniformLocation(embossProgram, "uSpecularPower"),
     };
   
     const renderPost = () => {
@@ -1739,20 +1756,24 @@ export default function Boids() {
     
         gl.drawArrays(gl.TRIANGLES, 0, 6);
     
-        if (ENABLE_ASCII) {
+        if (ENABLE_EMBOSS) {
           gl.bindFramebuffer(gl.FRAMEBUFFER, null);
           gl.viewport(0, 0, rw, rh);
-          gl.useProgram(asciiProgram);
-          bindFullscreenQuad(asciiProgram);
+          gl.useProgram(embossProgram);
+          bindFullscreenQuad(embossProgram);
     
           gl.activeTexture(gl.TEXTURE0);
           gl.bindTexture(gl.TEXTURE_2D, passATexture);
-          gl.uniform1i(asciiUniforms.texture, 0);
-          gl.uniform2f(asciiUniforms.resolution, w, h);
-    
-          const mouse = mouseRef.current ?? { x: w * 0.5, y: 0 };
-          gl.uniform2f(asciiUniforms.mouse, mouse.x, mouse.y);
-          gl.uniform1f(asciiUniforms.pixelation, 0.5);
+          gl.uniform1i(embossUniforms.texture, 0);
+          gl.uniform2f(embossUniforms.resolution, densityW, densityH);
+          gl.uniform1f(embossUniforms.heightScale, EMBOSS_HEIGHT_SCALE);
+          gl.uniform2f(embossUniforms.lightDir, EMBOSS_LIGHT_X, EMBOSS_LIGHT_Y);
+          gl.uniform3f(embossUniforms.baseColor, 0.94, 0.93, 0.90);
+          gl.uniform1f(embossUniforms.ambient, EMBOSS_AMBIENT);
+          gl.uniform1f(embossUniforms.diffuse, EMBOSS_DIFFUSE);
+          gl.uniform1f(embossUniforms.shadowStrength, EMBOSS_SHADOW);
+          gl.uniform1f(embossUniforms.specularStrength, EMBOSS_SPECULAR);
+          gl.uniform1f(embossUniforms.specularPower, EMBOSS_SPECULAR_POWER);
     
           gl.drawArrays(gl.TRIANGLES, 0, 6);
           return;
@@ -1833,7 +1854,7 @@ export default function Boids() {
       gl.deleteProgram(copyProgram);
       gl.deleteProgram(blurProgram);
       gl.deleteProgram(densityResolveProgram);
-      gl.deleteProgram(asciiProgram);
+      gl.deleteProgram(embossProgram);
     };
   }, []);
 
