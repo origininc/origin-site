@@ -2,82 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import {
-  densityResolveFrag,
-  densityResolveVert,
-} from "@/shaders/densityResolve";
-
-import {
-  heightToNormalFrag,
-  heightToNormalVert,
-} from "@/shaders/heightToNormal";
-
-const copyVert = `
-precision mediump float;
-
-attribute vec2 aPosition;
-varying vec2 vUv;
-
-void main() {
-  vUv = aPosition * 0.5 + 0.5;
-  gl_Position = vec4(aPosition, 0.0, 1.0);
-}
-`;
-
-const copyFrag = `
-precision mediump float;
-
-uniform sampler2D uTexture;
-varying vec2 vUv;
-
-void main() {
-  gl_FragColor = texture2D(uTexture, vUv);
-}
-`;
-
-const fieldBlurVert = `
-precision mediump float;
-
-attribute vec2 aPosition;
-varying vec2 vUv;
-
-void main() {
-  vUv = aPosition * 0.5 + 0.5;
-  gl_Position = vec4(aPosition, 0.0, 1.0);
-}
-`;
-
-const fieldBlurFrag = `
-precision mediump float;
-
-uniform sampler2D uTexture;
-uniform vec2 uResolution;
-uniform vec2 uDirection;
-uniform float uBlurRadius;
-
-varying vec2 vUv;
-
-float gaussian(float x, float sigma) {
-  return exp(-(x * x) / (2.0 * sigma * sigma));
-}
-
-void main() {
-  vec2 texel = 1.0 / uResolution;
-  vec2 dir = uDirection * texel;
-
-  vec4 sum = vec4(0.0);
-  float weightSum = 0.0;
-
-  for (int i = -8; i <= 8; i++) {
-    float fi = float(i);
-    float w = gaussian(fi, uBlurRadius);
-    sum += texture2D(uTexture, vUv + dir * fi) * w;
-    weightSum += w;
-  }
-
-  gl_FragColor = sum / max(weightSum, 0.0001);
-}
-`;
+import { BoidFieldRenderer } from "@/lib/rendering/boidFieldRenderer";
 
 type Vec2 = { x: number; y: number };
 const V = {
@@ -381,9 +306,13 @@ const LIFE_SIM_PRESET: Preset = {
   },
 };
 
-const COUNTS = [600, 1200, 2000, 2500, 3000] as const;
+const COUNTS = [500, 1200, 2000, 2500, 3000] as const;
 
-export default function Boids() {
+type BoidsProps = {
+  onFieldRenderer?: (renderer: BoidFieldRenderer | null) => void;
+};
+
+export default function Boids({ onFieldRenderer }: BoidsProps) {  
   const simCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const glCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [countIndex, setCountIndex] = useState(0);
@@ -403,15 +332,15 @@ export default function Boids() {
   const skeletonRef = useRef<Skeleton | null>(null);
 
   const ENABLE_DENSITY = true;
-  const ENABLE_NORMAL_PREVIEW = true;
+  const ENABLE_NORMAL_PREVIEW = false;
 
-  const NORMAL_HEIGHT_SCALE = 18.0;
+  const NORMAL_HEIGHT_SCALE = 40.0;
   
   const DENSITY_SCALE = 0.5;
-  const DENSITY_BLUR_RADIUS = 20.0;
-  const DENSITY_GAIN = 0.7;
-  const SPLAT_RADIUS_SCALE = 0.7;
-  const SPLAT_ALPHA_SCALE = 0.4;
+  const DENSITY_BLUR_RADIUS = 10.0;
+  const DENSITY_GAIN = 1.0;
+  const SPLAT_RADIUS_SCALE = 0.4;
+  const SPLAT_ALPHA_SCALE = 0.2;
 
   const MONOCHROME = true;
 
@@ -434,28 +363,7 @@ export default function Boids() {
   
     return shader;
   };
-  
-  const createProgram = (
-    gl: WebGLRenderingContext,
-    vert: string,
-    frag: string
-  ) => {
-    const vs = createShader(gl, gl.VERTEX_SHADER, vert);
-    const fs = createShader(gl, gl.FRAGMENT_SHADER, frag);
-  
-    const program = gl.createProgram()!;
-    gl.attachShader(program, vs);
-    gl.attachShader(program, fs);
-    gl.linkProgram(program);
-  
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      const info = gl.getProgramInfoLog(program);
-      gl.deleteProgram(program);
-      throw new Error(info || "Program link failed");
-    }
-  
-    return program;
-  };
+
 
   const speedToRgb = (speed: number, minSpeed: number, maxSpeed: number) => {
     const t = clamp((speed - minSpeed) / Math.max(1e-6, maxSpeed - minSpeed), 0, 1);
@@ -1528,259 +1436,41 @@ export default function Boids() {
     if (!gl) {
       throw new Error("WebGL not supported");
     }
-
-    const copyProgram = createProgram(gl, copyVert, copyFrag);
-
-    const blurProgram = createProgram(
-      gl,
-      fieldBlurVert,
-      fieldBlurFrag
-    );
-    
-    const densityResolveProgram = createProgram(
-      gl,
-      densityResolveVert,
-      densityResolveFrag
-    );
-    
-    const heightToNormalProgram = createProgram(
-      gl,
-      heightToNormalVert,
-      heightToNormalFrag
-    );
   
-    const quadBuffer = gl.createBuffer()!;
-    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([
-        -1, -1,
-         1, -1,
-        -1,  1,
-        -1,  1,
-         1, -1,
-         1,  1,
-      ]),
-      gl.STATIC_DRAW
-    );
+    const fieldRenderer = new BoidFieldRenderer(gl);
+    onFieldRenderer?.(fieldRenderer);
   
-    const bindFullscreenQuad = (program: WebGLProgram) => {
-      const positionLoc = gl.getAttribLocation(program, "aPosition");
-      gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-      gl.enableVertexAttribArray(positionLoc);
-      gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+    const allocateRendererTargets = () => {
+      fieldRenderer.allocate(simCanvas.width, simCanvas.height);
     };
   
-    const sourceTexture = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, sourceTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  
-    const passATexture = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, passATexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    
-    const passAFramebuffer = gl.createFramebuffer()!;
-    
-    const passBTexture = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, passBTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    
-    const passBFramebuffer = gl.createFramebuffer()!;
-  
-    const allocPassTargets = () => {
-      const densityW = simCanvas.width;
-      const densityH = simCanvas.height;
-    
-      gl.bindTexture(gl.TEXTURE_2D, passATexture);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA,
-        densityW,
-        densityH,
-        0,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        null
-      );
-    
-      gl.bindFramebuffer(gl.FRAMEBUFFER, passAFramebuffer);
-      gl.framebufferTexture2D(
-        gl.FRAMEBUFFER,
-        gl.COLOR_ATTACHMENT0,
-        gl.TEXTURE_2D,
-        passATexture,
-        0
-      );
-    
-      let status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-      if (status !== gl.FRAMEBUFFER_COMPLETE) {
-        throw new Error(`passA framebuffer incomplete: ${status}`);
-      }
-    
-      gl.bindTexture(gl.TEXTURE_2D, passBTexture);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA,
-        densityW,
-        densityH,
-        0,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        null
-      );
-    
-      gl.bindFramebuffer(gl.FRAMEBUFFER, passBFramebuffer);
-      gl.framebufferTexture2D(
-        gl.FRAMEBUFFER,
-        gl.COLOR_ATTACHMENT0,
-        gl.TEXTURE_2D,
-        passBTexture,
-        0
-      );
-    
-      status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-      if (status !== gl.FRAMEBUFFER_COMPLETE) {
-        throw new Error(`passB framebuffer incomplete: ${status}`);
-      }
-    
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    };
-  
-    allocPassTargets();
-
-    const copyUniforms = {
-      texture: gl.getUniformLocation(copyProgram, "uTexture"),
-    };
-    
-    const blurUniforms = {
-      texture: gl.getUniformLocation(blurProgram, "uTexture"),
-      resolution: gl.getUniformLocation(blurProgram, "uResolution"),
-      direction: gl.getUniformLocation(blurProgram, "uDirection"),
-      blurRadius: gl.getUniformLocation(blurProgram, "uBlurRadius"),
-    };
-    
-    const densityResolveUniforms = {
-      texture: gl.getUniformLocation(densityResolveProgram, "uTexture"),
-      densityGain: gl.getUniformLocation(densityResolveProgram, "uDensityGain"),
-    };
-    
-    const heightToNormalUniforms = {
-      texture: gl.getUniformLocation(heightToNormalProgram, "uTexture"),
-      resolution: gl.getUniformLocation(heightToNormalProgram, "uResolution"),
-      heightScale: gl.getUniformLocation(heightToNormalProgram, "uHeightScale"),
-    };
+    allocateRendererTargets();
   
     const renderPost = () => {
       const { w, h, dpr } = sizeRef.current;
       const rw = Math.max(1, Math.floor(w * dpr));
       const rh = Math.max(1, Math.floor(h * dpr));
-    
-      const densityW = simCanvas.width;
-      const densityH = simCanvas.height;
-    
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, sourceTexture);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        simCanvas
-      );
-    
+  
       if (ENABLE_DENSITY) {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, passAFramebuffer);
-        gl.viewport(0, 0, densityW, densityH);
-        gl.useProgram(blurProgram);
-        bindFullscreenQuad(blurProgram);
-    
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, sourceTexture);
-        gl.uniform1i(blurUniforms.texture, 0);
-        gl.uniform2f(blurUniforms.resolution, densityW, densityH);
-        gl.uniform2f(blurUniforms.direction, 1.0, 0.0);
-        gl.uniform1f(blurUniforms.blurRadius, DENSITY_BLUR_RADIUS);
-    
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-    
-        gl.bindFramebuffer(gl.FRAMEBUFFER, passBFramebuffer);
-        gl.viewport(0, 0, densityW, densityH);
-        gl.useProgram(blurProgram);
-        bindFullscreenQuad(blurProgram);
-    
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, passATexture);
-        gl.uniform1i(blurUniforms.texture, 0);
-        gl.uniform2f(blurUniforms.resolution, densityW, densityH);
-        gl.uniform2f(blurUniforms.direction, 0.0, 1.0);
-        gl.uniform1f(blurUniforms.blurRadius, DENSITY_BLUR_RADIUS);
-    
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-    
-        gl.bindFramebuffer(gl.FRAMEBUFFER, passAFramebuffer);
-        gl.viewport(0, 0, densityW, densityH);
-        gl.useProgram(densityResolveProgram);
-        bindFullscreenQuad(densityResolveProgram);
-    
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, passBTexture);
-        gl.uniform1i(densityResolveUniforms.texture, 0);
-        gl.uniform1f(densityResolveUniforms.densityGain, DENSITY_GAIN);
-    
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-    
-        if (ENABLE_NORMAL_PREVIEW) {
-          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-          gl.viewport(0, 0, rw, rh);
-          gl.useProgram(heightToNormalProgram);
-          bindFullscreenQuad(heightToNormalProgram);
-        
-          gl.activeTexture(gl.TEXTURE0);
-          gl.bindTexture(gl.TEXTURE_2D, passATexture);
-          gl.uniform1i(heightToNormalUniforms.texture, 0);
-          gl.uniform2f(heightToNormalUniforms.resolution, densityW, densityH);
-          gl.uniform1f(heightToNormalUniforms.heightScale, NORMAL_HEIGHT_SCALE);
-        
-          gl.drawArrays(gl.TRIANGLES, 0, 6);
-          return;
-        }
-    
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.viewport(0, 0, rw, rh);
-        gl.useProgram(copyProgram);
-        bindFullscreenQuad(copyProgram);
-    
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, passATexture);
-        gl.uniform1i(copyUniforms.texture, 0);
-    
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        fieldRenderer.renderDensityAndNormal({
+          inputCanvas: simCanvas,
+          densityWidth: simCanvas.width,
+          densityHeight: simCanvas.height,
+          outputWidth: rw,
+          outputHeight: rh,
+          previewNormal: ENABLE_NORMAL_PREVIEW,
+          options: {
+            blurRadius: DENSITY_BLUR_RADIUS,
+            densityGain: DENSITY_GAIN,
+            heightScale: NORMAL_HEIGHT_SCALE,
+          },
+        });
         return;
       }
-    
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  
       gl.viewport(0, 0, rw, rh);
-      gl.useProgram(copyProgram);
-      bindFullscreenQuad(copyProgram);
-    
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, sourceTexture);
-      gl.uniform1i(copyUniforms.texture, 0);
-    
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
     };
   
     const onMove = (e: MouseEvent) => {
@@ -1796,7 +1486,7 @@ export default function Boids() {
       resize();
       initSkeleton();
       resetBoids();
-      allocPassTargets();
+      allocateRendererTargets();
     };
   
     window.addEventListener("resize", onResize);
@@ -1806,7 +1496,7 @@ export default function Boids() {
     runningRef.current = true;
     let raf = 0;
   
-    const loop = (time: number) => {
+    const loop = () => {
       if (!runningRef.current) return;
       step();
       draw();
@@ -1824,16 +1514,8 @@ export default function Boids() {
       glCanvas.removeEventListener("mousemove", onMove);
       glCanvas.removeEventListener("mouseleave", onLeave);
   
-      gl.deleteFramebuffer(passAFramebuffer);
-      gl.deleteFramebuffer(passBFramebuffer);
-      gl.deleteTexture(passATexture);
-      gl.deleteTexture(passBTexture);
-      gl.deleteTexture(sourceTexture);
-      gl.deleteBuffer(quadBuffer);
-      gl.deleteProgram(copyProgram);
-      gl.deleteProgram(blurProgram);
-      gl.deleteProgram(densityResolveProgram);
-      gl.deleteProgram(heightToNormalProgram);
+      fieldRenderer.dispose();
+      onFieldRenderer?.(null);
     };
   }, []);
 

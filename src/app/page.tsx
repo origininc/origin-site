@@ -1,9 +1,9 @@
-import BoidsGlassPreview from "@/components/Boids";
+import BoidsR3FPreview from "@/components/GlassPlane";
 
 export default function Home() {
   return (
     <main style={{ width: "100vw", height: "100vh" }}>
-      <BoidsGlassPreview />
+      <BoidsR3FPreview />
     </main>
   );
 }
