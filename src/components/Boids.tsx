@@ -22,6 +22,11 @@ import {
   radialGlowVert,
 } from "@/components/shaders/radialGlow";
 
+import {
+  vignetteFrag,
+  vignetteVert,
+} from "@/components/shaders/vignette";
+
 const copyVert = `
 precision mediump float;
 
@@ -377,6 +382,7 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
   const ENABLE_ASCII = true;
   const ENABLE_CHROMATIC = true;
   const ENABLE_RADIAL_GLOW = true;
+  const ENABLE_VIGNETTE = true;
 
   const rand = (min: number, max: number) => Math.random() * (max - min) + min;
 
@@ -1528,6 +1534,12 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
       radialGlowVert,
       radialGlowFrag
     );
+
+    const vignetteProgram = createProgram(
+      gl,
+      vignetteVert,
+      vignetteFrag
+    );
   
     const quadBuffer = gl.createBuffer()!;
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
@@ -1672,6 +1684,14 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
       radialFalloff: gl.getUniformLocation(glowProgram, "uRadialFalloff"),
     };
 
+    const vignetteUniforms = {
+      texture: gl.getUniformLocation(vignetteProgram, "uTexture"),
+      resolution: gl.getUniformLocation(vignetteProgram, "uResolution"),
+      strength: gl.getUniformLocation(vignetteProgram, "uStrength"),
+      power: gl.getUniformLocation(vignetteProgram, "uPower"),
+      zoom: gl.getUniformLocation(vignetteProgram, "uZoom"),
+    };
+
     const renderPost = (timeMs: number) => {
       const { w, h, dpr } = sizeRef.current;
       const rw = Math.max(1, Math.floor(w * dpr));
@@ -1764,6 +1784,21 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
             gl.uniform1f(glowUniforms.glowRadius, 6.0);
             gl.uniform1f(glowUniforms.radialStrength, 2.0);
             gl.uniform1f(glowUniforms.radialFalloff, 1.65);
+          },
+          currentTexture
+        );
+      }
+
+      if (ENABLE_VIGNETTE) {
+        renderPassToFbo(
+          vignetteProgram,
+          () => {
+            gl.uniform1i(vignetteUniforms.texture, 0);
+            gl.uniform2f(vignetteUniforms.resolution, w, h);
+            gl.uniform1f(vignetteUniforms.strength, 16.0);
+            gl.uniform1f(vignetteUniforms.power, 1.5);
+            gl.uniform1f(vignetteUniforms.zoom, 1.5);
+
           },
           currentTexture
         );
@@ -1863,6 +1898,7 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
       gl.deleteProgram(asciiProgram);
       gl.deleteProgram(chromaticProgram);
       gl.deleteProgram(glowProgram);
+      gl.deleteProgram(vignetteProgram);
       gl.deleteProgram(copyProgram);
     };
   }, []);
