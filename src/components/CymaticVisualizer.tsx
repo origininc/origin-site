@@ -72,16 +72,16 @@ void main() {
 `;
 
 const MODES: ModePair[] = [
-  { n: 2, m: 3 },
   { n: 3, m: 5 },
   { n: 1, m: 4 },
   { n: 1, m: 5 },
+  { n: 2, m: 7 },
 ];
 const AGENT_COLORS: Rgb[] = [
-  { r: 1.0, g: 0.5, b: 0.0 },
   { r: 0.0, g: 0.0, b: 1.0 },
   { r: 1.0, g: 0.0, b: 0.0 },
   { r: 0.0, g: 1.0, b: 1.0 },
+  { r: 1.0, g: 0.15, b: 0.72 },
 ];
 const CENTER_REPEL_RADIUS = 0.18;
 const CENTER_REPEL_STRENGTH = 0.0048;
@@ -96,6 +96,7 @@ const HUE_SHIFT_MAX = 0.32;
 const TARGET_AGENT_LUMA = 0.62;
 const MAX_LUMA_LIFT = 1.0;
 const ENABLE_RADIAL_GLOW = true;
+const GLOW_OVERSCAN = 0.12;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
@@ -207,7 +208,11 @@ const getBlendedAgentColor = (value: number) => {
   return lerpColor(AGENT_COLORS[baseIndex], AGENT_COLORS[nextIndex], mix);
 };
 
-const getDaisyBlend = (value: number) => clamp(value - 3, 0, 1);
+const getPulseLegacyBlend = (value: number) => {
+  const intoPulse = clamp(value - 2, 0, 1);
+  const outOfPulse = clamp(value - 3, 0, 1);
+  return intoPulse * (1 - outOfPulse);
+};
 
 const chladni = (x: number, y: number, mode: ModePair) => {
   const scale = Math.PI * 0.5;
@@ -297,7 +302,15 @@ export default function CymaticVisualizer({
   const glCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const simCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const particlesRef = useRef<Particle[]>([]);
-  const sizeRef = useRef({ dpr: 1, h: 0, w: 0 });
+  const sizeRef = useRef({
+    dpr: 1,
+    padX: 0,
+    padY: 0,
+    renderH: 0,
+    renderW: 0,
+    viewH: 0,
+    viewW: 0,
+  });
   const targetValueRef = useRef(value);
   const simValueRef = useRef(value);
   const opacityRef = useRef(opacity);
@@ -423,9 +436,9 @@ export default function CymaticVisualizer({
         return;
       }
 
-      const { w, h, dpr } = sizeRef.current;
-      const rw = Math.max(1, Math.floor(w * dpr));
-      const rh = Math.max(1, Math.floor(h * dpr));
+      const { dpr, renderH, renderW } = sizeRef.current;
+      const rw = Math.max(1, Math.floor(renderW * dpr));
+      const rh = Math.max(1, Math.floor(renderH * dpr));
 
       gl.bindTexture(gl.TEXTURE_2D, passATexture);
       gl.texImage2D(
@@ -505,9 +518,9 @@ export default function CymaticVisualizer({
         return;
       }
 
-      const { w, h, dpr } = sizeRef.current;
-      const rw = Math.max(1, Math.floor(w * dpr));
-      const rh = Math.max(1, Math.floor(h * dpr));
+      const { dpr, renderH, renderW } = sizeRef.current;
+      const rw = Math.max(1, Math.floor(renderW * dpr));
+      const rh = Math.max(1, Math.floor(renderH * dpr));
       const localCopyProgram = copyProgram;
       const localBlurProgram = blurProgram;
       const localAsciiProgram = asciiProgram;
@@ -569,7 +582,7 @@ export default function CymaticVisualizer({
         localBlurProgram,
         () => {
           gl.uniform1i(localBlurUniforms.texture, 0);
-          gl.uniform2f(localBlurUniforms.resolution, w, h);
+          gl.uniform2f(localBlurUniforms.resolution, renderW, renderH);
           gl.uniform1f(localBlurUniforms.blurAmount, 6.0);
         },
         currentTexture
@@ -579,8 +592,8 @@ export default function CymaticVisualizer({
         localAsciiProgram,
         () => {
           gl.uniform1i(localAsciiUniforms.texture, 0);
-          gl.uniform2f(localAsciiUniforms.resolution, w, h);
-          gl.uniform2f(localAsciiUniforms.mouse, w * 0.5, h * 0.5);
+          gl.uniform2f(localAsciiUniforms.resolution, renderW, renderH);
+          gl.uniform2f(localAsciiUniforms.mouse, renderW * 0.5, renderH * 0.5);
           gl.uniform1f(localAsciiUniforms.pixelation, 1.0);
         },
         currentTexture
@@ -591,7 +604,7 @@ export default function CymaticVisualizer({
         () => {
           gl.uniform1i(localChromaticUniforms.texture, 0);
           gl.uniform1f(localChromaticUniforms.time, timeMs * 0.001);
-          gl.uniform2f(localChromaticUniforms.resolution, w, h);
+          gl.uniform2f(localChromaticUniforms.resolution, renderW, renderH);
         },
         currentTexture
       );
@@ -601,9 +614,9 @@ export default function CymaticVisualizer({
           localGlowProgram,
           () => {
             gl.uniform1i(localGlowUniforms.texture, 0);
-            gl.uniform2f(localGlowUniforms.resolution, w, h);
-            gl.uniform1f(localGlowUniforms.glowStrength, 1.55);
-            gl.uniform1f(localGlowUniforms.glowRadius, 4.0);
+            gl.uniform2f(localGlowUniforms.resolution, renderW, renderH);
+            gl.uniform1f(localGlowUniforms.glowStrength, 1.8);
+            gl.uniform1f(localGlowUniforms.glowRadius, 7.0);
             gl.uniform1f(localGlowUniforms.radialStrength, 0.8);
             gl.uniform1f(localGlowUniforms.radialFalloff, 1.45);
           },
@@ -705,25 +718,41 @@ export default function CymaticVisualizer({
     }
 
     const resize = () => {
-      const width = Math.max(1, square.clientWidth);
-      const height = Math.max(1, square.clientHeight);
+      const viewWidth = Math.max(1, square.clientWidth);
+      const viewHeight = Math.max(1, square.clientHeight);
+      const padX = Math.round(viewWidth * GLOW_OVERSCAN);
+      const padY = Math.round(viewHeight * GLOW_OVERSCAN);
+      const renderWidth = viewWidth + padX * 2;
+      const renderHeight = viewHeight + padY * 2;
       const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
 
-      simCanvas.width = Math.floor(width * dpr);
-      simCanvas.height = Math.floor(height * dpr);
-      simCanvas.style.width = `${width}px`;
-      simCanvas.style.height = `${height}px`;
+      simCanvas.width = Math.floor(renderWidth * dpr);
+      simCanvas.height = Math.floor(renderHeight * dpr);
+      simCanvas.style.width = `${renderWidth}px`;
+      simCanvas.style.height = `${renderHeight}px`;
+      simCanvas.style.left = `${-padX}px`;
+      simCanvas.style.top = `${-padY}px`;
 
-      glCanvas.width = Math.floor(width * dpr);
-      glCanvas.height = Math.floor(height * dpr);
-      glCanvas.style.width = `${width}px`;
-      glCanvas.style.height = `${height}px`;
+      glCanvas.width = Math.floor(renderWidth * dpr);
+      glCanvas.height = Math.floor(renderHeight * dpr);
+      glCanvas.style.width = `${renderWidth}px`;
+      glCanvas.style.height = `${renderHeight}px`;
+      glCanvas.style.left = `${-padX}px`;
+      glCanvas.style.top = `${-padY}px`;
 
-      sizeRef.current = { w: width, h: height, dpr };
+      sizeRef.current = {
+        dpr,
+        padX,
+        padY,
+        renderH: renderHeight,
+        renderW: renderWidth,
+        viewH: viewHeight,
+        viewW: viewWidth,
+      };
       allocPassTargets();
 
       const particleCount = clamp(
-        Math.round((width * height) / 150),
+        Math.round((viewWidth * viewHeight) / 150),
         1100,
         2200
       );
@@ -744,8 +773,8 @@ export default function CymaticVisualizer({
         return;
       }
 
-      const { w, h, dpr } = sizeRef.current;
-      if (w <= 0 || h <= 0) {
+      const { dpr, padX, padY, renderH, renderW, viewH, viewW } = sizeRef.current;
+      if (renderW <= 0 || renderH <= 0 || viewW <= 0 || viewH <= 0) {
         return;
       }
 
@@ -756,7 +785,7 @@ export default function CymaticVisualizer({
       );
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, w, h);
+      ctx.clearRect(0, 0, renderW, renderH);
 
       const particles = particlesRef.current;
       const edge = 0.97;
@@ -830,8 +859,8 @@ export default function CymaticVisualizer({
 
       for (let i = 0; i < particles.length; i++) {
         const particle = particles[i];
-        const px = (particle.x * 0.5 + 0.5) * w;
-        const py = (particle.y * 0.5 + 0.5) * h;
+        const px = padX + (particle.x * 0.5 + 0.5) * viewW;
+        const py = padY + (particle.y * 0.5 + 0.5) * viewH;
         const nodeBand = Math.pow(particle.energy, 0.65);
         const nodeCloseness = 1 - clamp(nodeBand / NODE_CLOSENESS_RANGE, 0, 1);
         const alpha = lerp(0.16, 0.98, nodeCloseness * nodeCloseness);
@@ -842,11 +871,11 @@ export default function CymaticVisualizer({
           1
         );
         const hueShiftAmount = HUE_SHIFT_MAX * Math.pow(radialDistance, 0.7);
-        const daisyBlend = getDaisyBlend(simValueRef.current);
+        const pulseLegacyBlend = getPulseLegacyBlend(simValueRef.current);
         const shiftedColor = lerpColor(
           shiftHueTowardBrighterLuma(agentColor, hueShiftAmount),
           shiftHue(agentColor, hueShiftAmount),
-          daisyBlend
+          pulseLegacyBlend
         );
         const balancedColor = liftColorToLuma(
           shiftedColor,
