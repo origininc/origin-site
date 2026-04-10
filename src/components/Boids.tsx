@@ -345,7 +345,7 @@ const LIFE_SIM_PRESET: Preset = {
 const COUNTS = [600, 1200, 2000, 2500, 3000] as const;
 
 type BoidsProps = {
-  disperse?: number; // 0 = normal, 1 = fully dispersed
+  disperse?: number; 
 };
 
 export default function Boids({ disperse = 0 }: BoidsProps) {

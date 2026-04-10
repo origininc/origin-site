@@ -92,13 +92,15 @@ const getPixelateOpacity = (progress: number) => {
   return 1 - PIXELATE_OPACITY_DROP * ramp;
 };
 
-const getTitleIntroScale = (progress: number) => {
-  const active = clamp01(progress);
-  if (active < 0.25) return 1.16;
-  if (active < 0.5) return 1.1;
-  if (active < 0.75) return 1.05;
-  return 1;
-};
+// const getTitleIntroScale = (progress: number) => {
+//   const active = clamp01(progress);
+//   if (active < 0.25) return 1.16;
+//   if (active < 0.5) return 1.1;
+//   if (active < 0.75) return 1.05;
+//   return 1;
+// };
+
+const getTitleIntroScale = () => 1;
 
 const PLACEHOLDER_PAIRS = [
   {
@@ -129,17 +131,14 @@ export default function Home() {
   const handleScroll = useCallback((scroll: number) => {
     const vh = window.innerHeight;
 
-    // About text settles in earlier to create a wider fully-sharp overlap.
     const about = clamp01(scroll / (vh * HERO_ABOUT_IN_END));
     setAboutProgress(about);
 
-    // Hold the about copy longer before it begins fading out.
     const aboutFade = clamp01(
       (scroll - vh * HERO_ABOUT_OUT_START) / (vh * HERO_ABOUT_OUT_DURATION)
     );
     setAboutFadeProgress(aboutFade);
 
-    // Start the hero exit later, but still finish by the end of the spacer.
     const exit = clamp01(
       (scroll - vh * HERO_EXIT_START) / (vh * HERO_EXIT_DURATION)
     );
@@ -151,7 +150,6 @@ export default function Home() {
       return;
     }
 
-    // Drive the agent sequence from the placeholder section's own sticky travel.
     const rect = placeholderSection.getBoundingClientRect();
     const sectionTop = scroll + rect.top;
     const stickyTravel = Math.max(1, placeholderSection.offsetHeight - vh);
@@ -172,7 +170,6 @@ export default function Home() {
     };
   }, [handleScroll]);
 
-  // About text: fades in, holds, then fades out during the transition section.
   const aboutIn = aboutProgress;
   const aboutOut = 1 - aboutFadeProgress;
   const aboutPixelate = Math.max(1 - aboutIn, aboutFadeProgress);
@@ -182,16 +179,13 @@ export default function Home() {
     ? 24 * (1 - aboutIn)
     : -14 * aboutFadeProgress;
 
-  // ORIGIN title: fully visible until exit starts, then fades out
-  const titleIntroScale = getTitleIntroScale(aboutIn);
+  const titleIntroScale = getTitleIntroScale();
   const titlePixelate = exitProgress;
   const titleOpacity = (1 - exitProgress) * getPixelateOpacity(titlePixelate);
 
-  // Boids: disperse and fade to black
   const boidsOverlayOpacity = exitProgress;
   const disperseAmount = exitProgress;
 
-  // Scroll hint: fades out quickly as about fades in
   const hintOpacity = Math.max(0, 1 - aboutProgress * 3);
   const placeholderTimeline =
     -PLACEHOLDER_FADE_IN +
@@ -254,17 +248,14 @@ export default function Home() {
           } as CSSProperties
         }
       >
-        {/* Fixed boids background */}
         <div className="boids-bg">
           <Boids disperse={disperseAmount} />
-          {/* Black overlay that fades in to cover boids */}
           <div
             className="boids-fade"
             style={{ opacity: boidsOverlayOpacity }}
           />
         </div>
 
-        {/* Fixed overlay: ORIGIN title + about text */}
         <div className="fixed-overlay">
           <h1
             className="title"
@@ -361,10 +352,8 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Scroll spacer: 2x viewport for hero fade-in + about-to-black transition */}
         <div className="scroll-spacer" />
 
-        {/* Placeholder section — sits on solid black after boids have dispersed */}
         <section className="placeholder-section" ref={placeholderSectionRef} />
       </main>
 
