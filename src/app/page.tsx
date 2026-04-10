@@ -213,13 +213,11 @@ export default function Home() {
     placeholderProgress *
       (PLACEHOLDER_PAIRS.length - 1 + PLACEHOLDER_FADE_IN + PLACEHOLDER_HOLD);
 
-  // Boids fade to black as Innate (card 0) fades in — complete the moment Innate is fully visible
   const innatePhase = placeholderTimeline;
   const boidsOverlayOpacity = clamp01(
     (innatePhase + PLACEHOLDER_FADE_IN) / PLACEHOLDER_FADE_IN
   );
 
-  // Explode on exit, then pull back in as the black overlay covers the boids
   const disperseAmount = exitProgress * (1 - boidsOverlayOpacity * 0.85);
 
   const placeholderOverlayOpacity = PLACEHOLDER_PAIRS.reduce((maxVisibility, _, index) => {
@@ -275,7 +273,9 @@ export default function Home() {
       <main
         style={
           {
-            "--site-filter": siteInvert ? "invert(1)" : "none",
+            "--site-filter": siteInvert
+              ? "invert(1) grayscale(1)"
+              : "none",
           } as CSSProperties
         }
       >
