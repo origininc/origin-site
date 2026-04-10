@@ -417,8 +417,8 @@ export default function Boids() {
   const EMBOSS_LIGHT_X = -0.7;
   const EMBOSS_LIGHT_Y = -0.55;
   const EMBOSS_AMBIENT = 0.92;
-  const EMBOSS_DIFFUSE = 0.16;
-  const EMBOSS_SHADOW = 0.14;
+  const EMBOSS_DIFFUSE = 0.17;
+  const EMBOSS_SHADOW = 0.17;
   const EMBOSS_SPECULAR = 0.08;
   const EMBOSS_SPECULAR_POWER = 18.0;
 
@@ -1768,7 +1768,7 @@ export default function Boids() {
           gl.uniform2f(embossUniforms.resolution, densityW, densityH);
           gl.uniform1f(embossUniforms.heightScale, EMBOSS_HEIGHT_SCALE);
           gl.uniform2f(embossUniforms.lightDir, EMBOSS_LIGHT_X, EMBOSS_LIGHT_Y);
-          gl.uniform3f(embossUniforms.baseColor, 0.94, 0.93, 0.90);
+          gl.uniform3f(embossUniforms.baseColor, 0.9, 0.9, 0.9);
           gl.uniform1f(embossUniforms.ambient, EMBOSS_AMBIENT);
           gl.uniform1f(embossUniforms.diffuse, EMBOSS_DIFFUSE);
           gl.uniform1f(embossUniforms.shadowStrength, EMBOSS_SHADOW);
@@ -1868,69 +1868,101 @@ export default function Boids() {
       m === "seek" ? "flee" : m === "flee" ? "follow" : m === "follow" ? "off" : "seek"
     );
 
-  return (
-    <div className="container">
-      <div className="controls">
-        <button
-          className="button"
-          onClick={cycleMouseMode}
-          title="Cycle mouse interaction: Seek → Flee → Follow → Off"
-        >
-          {`Mouse: ${mouseMode.charAt(0).toUpperCase() + mouseMode.slice(1)}`}
-        </button>
-
-        <button
-          className="button"
-          onClick={() => setCountIndex((i) => (i + 1) % COUNTS.length)}
-          title="Cycle boid count"
-        >
-          Boids: {COUNTS[countIndex]}
-        </button>
+    return (
+      <div className="container">
+        <video
+          className="leavesVideo"
+          src="/leaves.mp4"
+          autoPlay
+          muted
+          loop
+          playsInline
+        />
+    
+        <div className="controls">
+          <button
+            className="button"
+            onClick={cycleMouseMode}
+            title="Cycle mouse interaction: Seek → Flee → Follow → Off"
+          >
+            {`Mouse: ${mouseMode.charAt(0).toUpperCase() + mouseMode.slice(1)}`}
+          </button>
+    
+          <button
+            className="button"
+            onClick={() => setCountIndex((i) => (i + 1) % COUNTS.length)}
+            title="Cycle boid count"
+          >
+            Boids: {COUNTS[countIndex]}
+          </button>
+        </div>
+    
+        <canvas ref={simCanvasRef} className="simCanvas" />
+        <canvas ref={glCanvasRef} className="canvas" />
+    
+        <style jsx>{`
+          .container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #fff;
+          }
+    
+          .canvas,
+          .simCanvas,
+          .leavesVideo {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+          }
+    
+          .canvas {
+            z-index: 1;
+          }
+    
+          .simCanvas {
+            visibility: hidden;
+            pointer-events: none;
+          }
+    
+          .leavesVideo {
+            z-index: 2;
+            object-fit: cover;
+            pointer-events: none;
+            mix-blend-mode: multiply;
+          }
+    
+          .controls {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+          }
+    
+          .button {
+            pointer-events: auto;
+            background: #000;
+            color: #fff;
+            border: none;
+            padding: 8px 12px;
+            font-size: 12px;
+            line-height: 1;
+            cursor: pointer;
+            opacity: 0.9;
+            transition: opacity 120ms ease, transform 80ms ease;
+            border-radius: 8px;
+          }
+    
+          .button:hover { opacity: 1; }
+          .button:active { transform: scale(0.95); }
+        `}</style>
       </div>
-
-      <canvas ref={simCanvasRef} className="simCanvas" />
-      <canvas ref={glCanvasRef} className="canvas" />
-
-      <style jsx>{`
-        .container { position: relative; width: 100%; height: 100%; }
-        .canvas,
-        .simCanvas {
-          position: absolute;
-          inset: 0;
-          width: 100%;
-          height: 100%;
-          display: block;
-        }
-        .simCanvas {
-          visibility: hidden;
-          pointer-events: none;
-        }
-        .controls {
-          position: absolute;
-          top: 12px;
-          left: 12px;
-          z-index: 10;
-          pointer-events: none;
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-        .button {
-          pointer-events: auto;
-          background: #000;
-          color: #fff;
-          border: none;
-          padding: 8px 12px;
-          font-size: 12px;
-          line-height: 1;
-          cursor: pointer;
-          opacity: 0.9;
-          transition: opacity 120ms ease, transform 80ms ease;
-          border-radius: 8px;
-        }
-        .button:hover { opacity: 1; }
-        .button:active { transform: scale(0.95); }
-      `}</style>
-    </div>
-  );
+    );
 }
