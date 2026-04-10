@@ -1795,8 +1795,8 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
           () => {
             gl.uniform1i(vignetteUniforms.texture, 0);
             gl.uniform2f(vignetteUniforms.resolution, w, h);
-            gl.uniform1f(vignetteUniforms.strength, 16.0);
-            gl.uniform1f(vignetteUniforms.power, 1.5);
+            gl.uniform1f(vignetteUniforms.strength, 3.0);
+            gl.uniform1f(vignetteUniforms.power, 1.1);
             gl.uniform1f(vignetteUniforms.zoom, 1.5);
 
           },

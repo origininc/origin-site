@@ -321,7 +321,7 @@ export default function Home() {
         snapStops={snapStops}
         snapThreshold={90}
         snapReleaseThreshold={150}
-        snapCooldownMs={520}
+        snapCooldownMs={50}
       />
 
       <main
