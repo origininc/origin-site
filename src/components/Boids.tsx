@@ -12,6 +12,11 @@ import {
   heightToNormalVert,
 } from "@/shaders/heightToNormal";
 
+import {
+  glassPassFrag,
+  glassPassVert,
+} from "@/shaders/glassPass";
+
 const copyVert = `
 precision mediump float;
 
@@ -403,7 +408,8 @@ export default function Boids() {
   const skeletonRef = useRef<Skeleton | null>(null);
 
   const ENABLE_DENSITY = true;
-  const ENABLE_NORMAL_PREVIEW = true;
+  const ENABLE_NORMAL_PREVIEW = false;
+  const ENABLE_GLASS = true;
 
   const NORMAL_HEIGHT_SCALE = 18.0;
   
@@ -1548,6 +1554,12 @@ export default function Boids() {
       heightToNormalVert,
       heightToNormalFrag
     );
+
+    const glassProgram = createProgram(
+      gl,
+      glassPassVert,
+      glassPassFrag
+    );
   
     const quadBuffer = gl.createBuffer()!;
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
@@ -1577,6 +1589,74 @@ export default function Boids() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    const backgroundTexture = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, backgroundTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      1,
+      1,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      new Uint8Array([235, 235, 235, 255])
+    );
+
+    const bgImage = new Image();
+    bgImage.src = "/bg.jpg";
+    bgImage.onload = () => {
+      gl.bindTexture(gl.TEXTURE_2D, backgroundTexture);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        bgImage
+      );
+    };
+
+    const plasticNormalTexture = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, plasticNormalTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      1,
+      1,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      new Uint8Array([128, 128, 255, 255])
+    );
+    
+    const plasticImg = new Image();
+    plasticImg.src = "/CrushedPlastic_N.jpg";
+    plasticImg.onload = () => {
+      gl.bindTexture(gl.TEXTURE_2D, plasticNormalTexture);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        plasticImg
+      );
+    };
   
     const passATexture = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, passATexture);
@@ -1677,8 +1757,16 @@ export default function Boids() {
     
     const heightToNormalUniforms = {
       texture: gl.getUniformLocation(heightToNormalProgram, "uTexture"),
+      plasticNormal: gl.getUniformLocation(heightToNormalProgram, "uPlasticNormal"),
       resolution: gl.getUniformLocation(heightToNormalProgram, "uResolution"),
       heightScale: gl.getUniformLocation(heightToNormalProgram, "uHeightScale"),
+    };
+
+    const glassUniforms = {
+      background: gl.getUniformLocation(glassProgram, "uBackground"),
+      heightTexture: gl.getUniformLocation(glassProgram, "uHeightTexture"),
+      normalTexture: gl.getUniformLocation(glassProgram, "uNormalTexture"),
+      resolution: gl.getUniformLocation(glassProgram, "uResolution"),
     };
   
     const renderPost = () => {
@@ -1741,18 +1829,58 @@ export default function Boids() {
         gl.uniform1f(densityResolveUniforms.densityGain, DENSITY_GAIN);
     
         gl.drawArrays(gl.TRIANGLES, 0, 6);
-    
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, passBFramebuffer);
+        gl.viewport(0, 0, densityW, densityH);
+        gl.useProgram(heightToNormalProgram);
+        bindFullscreenQuad(heightToNormalProgram);
+        
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, passATexture);
+        gl.uniform1i(heightToNormalUniforms.texture, 0);
+        
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, plasticNormalTexture);
+        gl.uniform1i(heightToNormalUniforms.plasticNormal, 1);
+        
+        gl.uniform2f(heightToNormalUniforms.resolution, densityW, densityH);
+        gl.uniform1f(heightToNormalUniforms.heightScale, NORMAL_HEIGHT_SCALE);
+        
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
         if (ENABLE_NORMAL_PREVIEW) {
           gl.bindFramebuffer(gl.FRAMEBUFFER, null);
           gl.viewport(0, 0, rw, rh);
-          gl.useProgram(heightToNormalProgram);
-          bindFullscreenQuad(heightToNormalProgram);
+          gl.useProgram(copyProgram);
+          bindFullscreenQuad(copyProgram);
         
           gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, passBTexture);
+          gl.uniform1i(copyUniforms.texture, 0);
+        
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+          return;
+        }
+        
+        if (ENABLE_GLASS) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          gl.viewport(0, 0, rw, rh);
+          gl.useProgram(glassProgram);
+          bindFullscreenQuad(glassProgram);
+        
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, backgroundTexture);
+          gl.uniform1i(glassUniforms.background, 0);
+        
+          gl.activeTexture(gl.TEXTURE1);
           gl.bindTexture(gl.TEXTURE_2D, passATexture);
-          gl.uniform1i(heightToNormalUniforms.texture, 0);
-          gl.uniform2f(heightToNormalUniforms.resolution, densityW, densityH);
-          gl.uniform1f(heightToNormalUniforms.heightScale, NORMAL_HEIGHT_SCALE);
+          gl.uniform1i(glassUniforms.heightTexture, 1);
+        
+          gl.activeTexture(gl.TEXTURE2);
+          gl.bindTexture(gl.TEXTURE_2D, passBTexture);
+          gl.uniform1i(glassUniforms.normalTexture, 2);
+        
+          gl.uniform2f(glassUniforms.resolution, rw, rh);
         
           gl.drawArrays(gl.TRIANGLES, 0, 6);
           return;
@@ -1829,11 +1957,14 @@ export default function Boids() {
       gl.deleteTexture(passATexture);
       gl.deleteTexture(passBTexture);
       gl.deleteTexture(sourceTexture);
+      gl.deleteTexture(backgroundTexture);
+      gl.deleteTexture(plasticNormalTexture);
       gl.deleteBuffer(quadBuffer);
       gl.deleteProgram(copyProgram);
       gl.deleteProgram(blurProgram);
       gl.deleteProgram(densityResolveProgram);
       gl.deleteProgram(heightToNormalProgram);
+      gl.deleteProgram(glassProgram);
     };
   }, []);
 
