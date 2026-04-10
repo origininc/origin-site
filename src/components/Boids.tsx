@@ -8,9 +8,9 @@ import {
 } from "@/shaders/densityResolve";
 
 import {
-  embossPostFrag,
-  embossPostVert,
-} from "@/shaders/embossPost";
+  heightToNormalFrag,
+  heightToNormalVert,
+} from "@/shaders/heightToNormal";
 
 const copyVert = `
 precision mediump float;
@@ -386,7 +386,7 @@ const COUNTS = [600, 1200, 2000, 2500, 3000] as const;
 export default function Boids() {
   const simCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const glCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [countIndex, setCountIndex] = useState(1);
+  const [countIndex, setCountIndex] = useState(0);
 
   const [mouseMode, setMouseMode] = useState<MouseMode>("seek");
   const mouseModeRef = useRef<MouseMode>("seek");
@@ -403,24 +403,17 @@ export default function Boids() {
   const skeletonRef = useRef<Skeleton | null>(null);
 
   const ENABLE_DENSITY = true;
-  const ENABLE_EMBOSS = true;
+  const ENABLE_NORMAL_PREVIEW = true;
+
+  const NORMAL_HEIGHT_SCALE = 18.0;
   
-  const DENSITY_SCALE = 1;
-  const DENSITY_BLUR_RADIUS = 40.0;
+  const DENSITY_SCALE = 0.5;
+  const DENSITY_BLUR_RADIUS = 20.0;
   const DENSITY_GAIN = 0.7;
-  const SPLAT_RADIUS_SCALE = 1.4;
-  const SPLAT_ALPHA_SCALE = 0.8;
+  const SPLAT_RADIUS_SCALE = 0.7;
+  const SPLAT_ALPHA_SCALE = 0.4;
 
   const MONOCHROME = true;
-
-  const EMBOSS_HEIGHT_SCALE = 30.0;
-  const EMBOSS_LIGHT_X = -0.7;
-  const EMBOSS_LIGHT_Y = -0.55;
-  const EMBOSS_AMBIENT = 0.92;
-  const EMBOSS_DIFFUSE = 0.16;
-  const EMBOSS_SHADOW = 0.14;
-  const EMBOSS_SPECULAR = 0.08;
-  const EMBOSS_SPECULAR_POWER = 18.0;
 
   const rand = (min: number, max: number) => Math.random() * (max - min) + min;
 
@@ -1550,10 +1543,10 @@ export default function Boids() {
       densityResolveFrag
     );
     
-    const embossProgram = createProgram(
+    const heightToNormalProgram = createProgram(
       gl,
-      embossPostVert,
-      embossPostFrag
+      heightToNormalVert,
+      heightToNormalFrag
     );
   
     const quadBuffer = gl.createBuffer()!;
@@ -1682,17 +1675,10 @@ export default function Boids() {
       densityGain: gl.getUniformLocation(densityResolveProgram, "uDensityGain"),
     };
     
-    const embossUniforms = {
-      texture: gl.getUniformLocation(embossProgram, "uTexture"),
-      resolution: gl.getUniformLocation(embossProgram, "uResolution"),
-      heightScale: gl.getUniformLocation(embossProgram, "uHeightScale"),
-      lightDir: gl.getUniformLocation(embossProgram, "uLightDir"),
-      baseColor: gl.getUniformLocation(embossProgram, "uBaseColor"),
-      ambient: gl.getUniformLocation(embossProgram, "uAmbient"),
-      diffuse: gl.getUniformLocation(embossProgram, "uDiffuse"),
-      shadowStrength: gl.getUniformLocation(embossProgram, "uShadowStrength"),
-      specularStrength: gl.getUniformLocation(embossProgram, "uSpecularStrength"),
-      specularPower: gl.getUniformLocation(embossProgram, "uSpecularPower"),
+    const heightToNormalUniforms = {
+      texture: gl.getUniformLocation(heightToNormalProgram, "uTexture"),
+      resolution: gl.getUniformLocation(heightToNormalProgram, "uResolution"),
+      heightScale: gl.getUniformLocation(heightToNormalProgram, "uHeightScale"),
     };
   
     const renderPost = () => {
@@ -1756,25 +1742,18 @@ export default function Boids() {
     
         gl.drawArrays(gl.TRIANGLES, 0, 6);
     
-        if (ENABLE_EMBOSS) {
+        if (ENABLE_NORMAL_PREVIEW) {
           gl.bindFramebuffer(gl.FRAMEBUFFER, null);
           gl.viewport(0, 0, rw, rh);
-          gl.useProgram(embossProgram);
-          bindFullscreenQuad(embossProgram);
-    
+          gl.useProgram(heightToNormalProgram);
+          bindFullscreenQuad(heightToNormalProgram);
+        
           gl.activeTexture(gl.TEXTURE0);
           gl.bindTexture(gl.TEXTURE_2D, passATexture);
-          gl.uniform1i(embossUniforms.texture, 0);
-          gl.uniform2f(embossUniforms.resolution, densityW, densityH);
-          gl.uniform1f(embossUniforms.heightScale, EMBOSS_HEIGHT_SCALE);
-          gl.uniform2f(embossUniforms.lightDir, EMBOSS_LIGHT_X, EMBOSS_LIGHT_Y);
-          gl.uniform3f(embossUniforms.baseColor, 0.94, 0.93, 0.90);
-          gl.uniform1f(embossUniforms.ambient, EMBOSS_AMBIENT);
-          gl.uniform1f(embossUniforms.diffuse, EMBOSS_DIFFUSE);
-          gl.uniform1f(embossUniforms.shadowStrength, EMBOSS_SHADOW);
-          gl.uniform1f(embossUniforms.specularStrength, EMBOSS_SPECULAR);
-          gl.uniform1f(embossUniforms.specularPower, EMBOSS_SPECULAR_POWER);
-    
+          gl.uniform1i(heightToNormalUniforms.texture, 0);
+          gl.uniform2f(heightToNormalUniforms.resolution, densityW, densityH);
+          gl.uniform1f(heightToNormalUniforms.heightScale, NORMAL_HEIGHT_SCALE);
+        
           gl.drawArrays(gl.TRIANGLES, 0, 6);
           return;
         }
@@ -1854,7 +1833,7 @@ export default function Boids() {
       gl.deleteProgram(copyProgram);
       gl.deleteProgram(blurProgram);
       gl.deleteProgram(densityResolveProgram);
-      gl.deleteProgram(embossProgram);
+      gl.deleteProgram(heightToNormalProgram);
     };
   }, []);
 
