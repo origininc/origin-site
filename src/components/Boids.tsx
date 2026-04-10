@@ -1456,15 +1456,17 @@ export default function Boids({ onFieldRenderer }: BoidsProps) {
           inputCanvas: simCanvas,
           densityWidth: simCanvas.width,
           densityHeight: simCanvas.height,
-          outputWidth: rw,
-          outputHeight: rh,
-          previewNormal: ENABLE_NORMAL_PREVIEW,
           options: {
             blurRadius: DENSITY_BLUR_RADIUS,
             densityGain: DENSITY_GAIN,
             heightScale: NORMAL_HEIGHT_SCALE,
           },
         });
+        
+        if (ENABLE_NORMAL_PREVIEW) {
+          fieldRenderer.previewTextureToScreen("normal", rw, rh);
+          return;
+        }
         return;
       }
   

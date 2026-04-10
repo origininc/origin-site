@@ -203,75 +203,17 @@ export class BoidFieldRenderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  readNormalPixels(): Uint8Array {
-    const gl = this.gl;
-    const { width, height } = this.getSize();
-  
-    if (width <= 0 || height <= 0) {
-      return new Uint8Array(0);
-    }
-  
-    const pixels = new Uint8Array(width * height * 4);
-  
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.normalFramebuffer);
-    gl.readPixels(
-      0,
-      0,
-      width,
-      height,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      pixels
-    );
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  
-    return pixels;
-  }
-  
-  blitNormalToCanvas(targetCanvas: HTMLCanvasElement) {
-    const { width, height } = this.getSize();
-    if (width <= 0 || height <= 0) return;
-  
-    const pixels = this.readNormalPixels();
-  
-    targetCanvas.width = width;
-    targetCanvas.height = height;
-  
-    const ctx = targetCanvas.getContext("2d");
-    if (!ctx) return;
-  
-    const imageData = ctx.createImageData(width, height);
-  
-    for (let y = 0; y < height; y++) {
-      const srcRow = height - 1 - y;
-      const srcOffset = srcRow * width * 4;
-      const dstOffset = y * width * 4;
-      imageData.data.set(
-        pixels.subarray(srcOffset, srcOffset + width * 4),
-        dstOffset
-      );
-    }
-  
-    ctx.putImageData(imageData, 0, 0);
-  }
-
   renderDensityAndNormal(params: {
     inputCanvas: HTMLCanvasElement;
     densityWidth: number;
     densityHeight: number;
-    outputWidth: number;
-    outputHeight: number;
     options: RendererOptions;
-    previewNormal?: boolean;
   }) {
     const {
       inputCanvas,
       densityWidth,
       densityHeight,
-      outputWidth,
-      outputHeight,
       options,
-      previewNormal = true,
     } = params;
 
     const gl = this.gl;
@@ -284,6 +226,7 @@ export class BoidFieldRenderer {
     }
 
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.sourceTexture);
     gl.texImage2D(
@@ -295,6 +238,7 @@ export class BoidFieldRenderer {
       inputCanvas
     );
 
+    // pass 1: horizontal blur -> A
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.passAFramebuffer);
     gl.viewport(0, 0, densityWidth, densityHeight);
     gl.useProgram(this.blurProgram);
@@ -308,6 +252,7 @@ export class BoidFieldRenderer {
     gl.uniform1f(this.blurUniforms.blurRadius, options.blurRadius);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
+    // pass 2: vertical blur -> B
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.passBFramebuffer);
     gl.viewport(0, 0, densityWidth, densityHeight);
     gl.useProgram(this.blurProgram);
@@ -321,6 +266,7 @@ export class BoidFieldRenderer {
     gl.uniform1f(this.blurUniforms.blurRadius, options.blurRadius);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
+    // pass 3: density resolve -> A
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.passAFramebuffer);
     gl.viewport(0, 0, densityWidth, densityHeight);
     gl.useProgram(this.densityResolveProgram);
@@ -332,6 +278,7 @@ export class BoidFieldRenderer {
     gl.uniform1f(this.densityResolveUniforms.densityGain, options.densityGain);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
+    // pass 4: height -> normal -> normal framebuffer
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.normalFramebuffer);
     gl.viewport(0, 0, densityWidth, densityHeight);
     gl.useProgram(this.heightToNormalProgram);
@@ -344,18 +291,11 @@ export class BoidFieldRenderer {
     gl.uniform1f(this.heightToNormalUniforms.heightScale, options.heightScale);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    if (previewNormal) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, outputWidth, outputHeight);
-      gl.useProgram(this.copyProgram);
-      bindFullscreenQuad(gl, this.quadBuffer, this.copyProgram);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
 
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this.normalTexture);
-      gl.uniform1i(this.copyUniforms.texture, 0);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-      return;
-    }
+  previewTextureToScreen(texture: "density" | "normal", outputWidth: number, outputHeight: number) {
+    const gl = this.gl;
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, outputWidth, outputHeight);
@@ -363,9 +303,64 @@ export class BoidFieldRenderer {
     bindFullscreenQuad(gl, this.quadBuffer, this.copyProgram);
 
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.passATexture);
+    gl.bindTexture(
+      gl.TEXTURE_2D,
+      texture === "normal" ? this.normalTexture : this.passATexture
+    );
     gl.uniform1i(this.copyUniforms.texture, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
+  readNormalPixels(): Uint8Array {
+    const gl = this.gl;
+    const { width, height } = this.getSize();
+
+    if (width <= 0 || height <= 0) {
+      return new Uint8Array(0);
+    }
+
+    const pixels = new Uint8Array(width * height * 4);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.normalFramebuffer);
+    gl.readPixels(
+      0,
+      0,
+      width,
+      height,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      pixels
+    );
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    return pixels;
+  }
+
+  blitNormalToCanvas(targetCanvas: HTMLCanvasElement) {
+    const { width, height } = this.getSize();
+    if (width <= 0 || height <= 0) return;
+
+    const pixels = this.readNormalPixels();
+
+    targetCanvas.width = width;
+    targetCanvas.height = height;
+
+    const ctx = targetCanvas.getContext("2d");
+    if (!ctx) return;
+
+    const imageData = ctx.createImageData(width, height);
+
+    for (let y = 0; y < height; y++) {
+      const srcRow = height - 1 - y;
+      const srcOffset = srcRow * width * 4;
+      const dstOffset = y * width * 4;
+      imageData.data.set(
+        pixels.subarray(srcOffset, srcOffset + width * 4),
+        dstOffset
+      );
+    }
+
+    ctx.putImageData(imageData, 0, 0);
   }
 
   getNormalTexture() {
@@ -374,6 +369,10 @@ export class BoidFieldRenderer {
 
   getDensityTexture() {
     return this.passATexture;
+  }
+
+  getNormalFramebuffer() {
+    return this.normalFramebuffer;
   }
 
   getSize() {
