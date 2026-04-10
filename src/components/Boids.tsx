@@ -1626,23 +1626,11 @@ export default function Boids() {
 
     const plasticNormalTexture = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, plasticNormalTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.RGBA,
-      1,
-      1,
-      0,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      new Uint8Array([128, 128, 255, 255])
-    );
-    
+
     const plasticImg = new Image();
     plasticImg.src = "/CrushedPlastic_N.jpg";
     plasticImg.onload = () => {
@@ -1834,20 +1822,14 @@ export default function Boids() {
         gl.viewport(0, 0, densityW, densityH);
         gl.useProgram(heightToNormalProgram);
         bindFullscreenQuad(heightToNormalProgram);
-        
+
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, passATexture);
         gl.uniform1i(heightToNormalUniforms.texture, 0);
-        
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, plasticNormalTexture);
-        gl.uniform1i(heightToNormalUniforms.plasticNormal, 1);
-        
         gl.uniform2f(heightToNormalUniforms.resolution, densityW, densityH);
         gl.uniform1f(heightToNormalUniforms.heightScale, NORMAL_HEIGHT_SCALE);
-        
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
 
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
         if (ENABLE_NORMAL_PREVIEW) {
           gl.bindFramebuffer(gl.FRAMEBUFFER, null);
           gl.viewport(0, 0, rw, rh);
@@ -1958,7 +1940,6 @@ export default function Boids() {
       gl.deleteTexture(passBTexture);
       gl.deleteTexture(sourceTexture);
       gl.deleteTexture(backgroundTexture);
-      gl.deleteTexture(plasticNormalTexture);
       gl.deleteBuffer(quadBuffer);
       gl.deleteProgram(copyProgram);
       gl.deleteProgram(blurProgram);
