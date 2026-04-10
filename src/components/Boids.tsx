@@ -17,6 +17,11 @@ import {
   horizontalBlurVert,
 } from "@/components/shaders/horizontalBlur";
 
+import {
+  radialGlowFrag,
+  radialGlowVert,
+} from "@/components/shaders/radialGlow";
+
 const copyVert = `
 precision mediump float;
 
@@ -125,6 +130,7 @@ type Boid = {
   s: number;
   side: number;
   speedScale: number;
+  smoothSpeed: number;
   anchorIdx?: number;
 };
 
@@ -370,6 +376,7 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
   const ENABLE_HORIZONTAL_BLUR = true;
   const ENABLE_ASCII = true;
   const ENABLE_CHROMATIC = true;
+  const ENABLE_RADIAL_GLOW = true;
 
   const rand = (min: number, max: number) => Math.random() * (max - min) + min;
 
@@ -936,6 +943,7 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
           s,
           side: Math.random() < 0.5 ? -1 : 1,
           speedScale: rand(svMin, svMax),
+          smoothSpeed: 0,
         };
 
         if ((sc.id === "bone" || sc.id === "wing") && anchorLen > 0) {
@@ -977,13 +985,13 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
     const base = presetRef.current;
     const boids = boidsRef.current;
     const disperseT = clamp(disperseRef.current, 0, 1);
-    const flockHold = lerp(1, 0.12, disperseT);
-    const structureHold = lerp(1, 0.04, disperseT);
-    const homeHold = lerp(1, 0.02, disperseT);
-    const disperseNeighborBoost = lerp(1, 1.7, disperseT);
-    const desiredSeparationBoost = lerp(1, 5.5, disperseT);
-    const sepForceBoost = lerp(1, 3.2, disperseT);
-    const sepWeightBoost = lerp(1, 7.5, disperseT);
+    const flockHold = lerp(1, 0.25, disperseT);
+    const structureHold = lerp(1, 0.1, disperseT);
+    const homeHold = lerp(1, 1.8, disperseT);
+    const disperseNeighborBoost = lerp(1, 1.4, disperseT);
+    const desiredSeparationBoost = lerp(1, 2.6, disperseT);
+    const sepForceBoost = lerp(1, 4.5, disperseT);
+    const sepWeightBoost = lerp(1, 6.0, disperseT);
 
     const {
       neighborDist,
@@ -1469,8 +1477,9 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
       const maxSpeedEff = base.maxSpeed * (sc.maxSpeedScale ?? 1) * b.speedScale;
       const minSpeedEff = maxSpeedEff * 0.1;
       const speed = Math.hypot(b.v.x, b.v.y);
-    
-      const { r, g, b: blue } = speedToRgb(speed, minSpeedEff, maxSpeedEff);
+      b.smoothSpeed = lerp(b.smoothSpeed, speed, 0.01);
+
+      const { r, g, b: blue } = speedToRgb(b.smoothSpeed, minSpeedEff, maxSpeedEff);
       const opacity = sc.opacity ?? 1.0;
     
       ctx.fillStyle = `rgba(${r}, ${g}, ${blue}, ${opacity})`;
@@ -1512,6 +1521,12 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
       gl,
       horizontalBlurVert,
       horizontalBlurFrag
+    );
+
+    const glowProgram = createProgram(
+      gl,
+      radialGlowVert,
+      radialGlowFrag
     );
   
     const quadBuffer = gl.createBuffer()!;
@@ -1647,7 +1662,16 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
       resolution: gl.getUniformLocation(blurProgram, "uResolution"),
       blurAmount: gl.getUniformLocation(blurProgram, "uBlurAmount"),
     };
-  
+
+    const glowUniforms = {
+      texture: gl.getUniformLocation(glowProgram, "uTexture"),
+      resolution: gl.getUniformLocation(glowProgram, "uResolution"),
+      glowStrength: gl.getUniformLocation(glowProgram, "uGlowStrength"),
+      glowRadius: gl.getUniformLocation(glowProgram, "uGlowRadius"),
+      radialStrength: gl.getUniformLocation(glowProgram, "uRadialStrength"),
+      radialFalloff: gl.getUniformLocation(glowProgram, "uRadialFalloff"),
+    };
+
     const renderPost = (timeMs: number) => {
       const { w, h, dpr } = sizeRef.current;
       const rw = Math.max(1, Math.floor(w * dpr));
@@ -1725,6 +1749,21 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
             gl.uniform1i(chromaticUniforms.texture, 0);
             gl.uniform1f(chromaticUniforms.time, timeMs * 0.001);
             gl.uniform2f(chromaticUniforms.resolution, w, h);
+          },
+          currentTexture
+        );
+      }
+
+      if (ENABLE_RADIAL_GLOW) {
+        renderPassToFbo(
+          glowProgram,
+          () => {
+            gl.uniform1i(glowUniforms.texture, 0);
+            gl.uniform2f(glowUniforms.resolution, w, h);
+            gl.uniform1f(glowUniforms.glowStrength, 1.35);
+            gl.uniform1f(glowUniforms.glowRadius, 6.0);
+            gl.uniform1f(glowUniforms.radialStrength, 2.0);
+            gl.uniform1f(glowUniforms.radialFalloff, 1.65);
           },
           currentTexture
         );
@@ -1823,6 +1862,8 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
       gl.deleteProgram(blurProgram);
       gl.deleteProgram(asciiProgram);
       gl.deleteProgram(chromaticProgram);
+      gl.deleteProgram(glowProgram);
+      gl.deleteProgram(copyProgram);
     };
   }, []);
 

@@ -183,14 +183,21 @@ export default function Home() {
   const titlePixelate = exitProgress;
   const titleOpacity = (1 - exitProgress) * getPixelateOpacity(titlePixelate);
 
-  const boidsOverlayOpacity = exitProgress;
-  const disperseAmount = exitProgress;
-
   const hintOpacity = Math.max(0, 1 - aboutProgress * 3);
   const placeholderTimeline =
     -PLACEHOLDER_FADE_IN +
     placeholderProgress *
       (PLACEHOLDER_PAIRS.length - 1 + PLACEHOLDER_FADE_IN + PLACEHOLDER_HOLD);
+
+  // Boids fade to black as Innate (card 0) fades in — complete the moment Innate is fully visible
+  const innatePhase = placeholderTimeline;
+  const boidsOverlayOpacity = clamp01(
+    (innatePhase + PLACEHOLDER_FADE_IN) / PLACEHOLDER_FADE_IN
+  );
+
+  // Explode on exit, then pull back in as the black overlay covers the boids
+  const disperseAmount = exitProgress * (1 - boidsOverlayOpacity * 0.85);
+
   const placeholderOverlayOpacity = PLACEHOLDER_PAIRS.reduce((maxVisibility, _, index) => {
     const phase = placeholderTimeline - index;
     const visibility = getAgentCardVisibility(

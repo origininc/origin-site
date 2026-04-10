@@ -13,6 +13,10 @@ import {
   temporalChromaticAberrationVert,
 } from "@/components/shaders/temporalChromaticAberration";
 import { useEffect, useRef } from "react";
+import {
+  radialGlowFrag,
+  radialGlowVert,
+} from "@/components/shaders/radialGlow";
 
 type CymaticVisualizerProps = {
   value: number;
@@ -60,7 +64,10 @@ uniform sampler2D uTexture;
 varying vec2 vUv;
 
 void main() {
-  gl_FragColor = texture2D(uTexture, vUv);
+  vec4 col = texture2D(uTexture, vUv);
+  float luma = dot(col.rgb, vec3(0.2126, 0.7152, 0.0722));
+  float alpha = step(0.001, luma);
+  gl_FragColor = vec4(col.rgb, alpha);
 }
 `;
 
@@ -88,6 +95,7 @@ const COLOR_BRIGHTNESS_BOOST = 1.01;
 const HUE_SHIFT_MAX = 0.32;
 const TARGET_AGENT_LUMA = 0.62;
 const MAX_LUMA_LIFT = 1.0;
+const ENABLE_RADIAL_GLOW = true;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
@@ -360,6 +368,7 @@ export default function CymaticVisualizer({
     let blurProgram: WebGLProgram | null = null;
     let asciiProgram: WebGLProgram | null = null;
     let chromaticProgram: WebGLProgram | null = null;
+    let glowProgram: WebGLProgram | null = null;
     let quadBuffer: WebGLBuffer | null = null;
     let sourceTexture: WebGLTexture | null = null;
     let passATexture: WebGLTexture | null = null;
@@ -392,6 +401,16 @@ export default function CymaticVisualizer({
           time: WebGLUniformLocation | null;
         }
       | null = null;
+    let glowUniforms:
+    | {
+        texture: WebGLUniformLocation | null;
+        resolution: WebGLUniformLocation | null;
+        glowStrength: WebGLUniformLocation | null;
+        glowRadius: WebGLUniformLocation | null;
+        radialStrength: WebGLUniformLocation | null;
+        radialFalloff: WebGLUniformLocation | null;
+      }
+    | null = null;
 
     const allocPassTargets = () => {
       if (
@@ -471,10 +490,12 @@ export default function CymaticVisualizer({
         !blurProgram ||
         !asciiProgram ||
         !chromaticProgram ||
+        !glowProgram ||
         !copyUniforms ||
         !blurUniforms ||
         !asciiUniforms ||
         !chromaticUniforms ||
+        !glowUniforms ||
         !sourceTexture ||
         !passATexture ||
         !passAFramebuffer ||
@@ -491,10 +512,12 @@ export default function CymaticVisualizer({
       const localBlurProgram = blurProgram;
       const localAsciiProgram = asciiProgram;
       const localChromaticProgram = chromaticProgram;
+      const localGlowProgram = glowProgram;
       const localCopyUniforms = copyUniforms;
       const localBlurUniforms = blurUniforms;
       const localAsciiUniforms = asciiUniforms;
       const localChromaticUniforms = chromaticUniforms;
+      const localGlowUniforms = glowUniforms;
       const localSourceTexture = sourceTexture;
       const localPassATexture = passATexture;
       const localPassAFramebuffer = passAFramebuffer;
@@ -573,14 +596,34 @@ export default function CymaticVisualizer({
         currentTexture
       );
 
+      if (ENABLE_RADIAL_GLOW) {
+        renderPassToFbo(
+          localGlowProgram,
+          () => {
+            gl.uniform1i(localGlowUniforms.texture, 0);
+            gl.uniform2f(localGlowUniforms.resolution, w, h);
+            gl.uniform1f(localGlowUniforms.glowStrength, 1.55);
+            gl.uniform1f(localGlowUniforms.glowRadius, 4.0);
+            gl.uniform1f(localGlowUniforms.radialStrength, 0.8);
+            gl.uniform1f(localGlowUniforms.radialFalloff, 1.45);
+          },
+          currentTexture
+        );
+      }
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, rw, rh);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.useProgram(localCopyProgram);
       bindFullscreenQuad(localCopyProgram);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, currentTexture);
       gl.uniform1i(localCopyUniforms.texture, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
+      gl.disable(gl.BLEND);
     };
 
     if (gl) {
@@ -592,6 +635,7 @@ export default function CymaticVisualizer({
         temporalChromaticAberrationVert,
         temporalChromaticAberrationFrag
       );
+      glowProgram = createProgram(gl, radialGlowVert, radialGlowFrag);
 
       quadBuffer = gl.createBuffer()!;
       gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
@@ -649,6 +693,14 @@ export default function CymaticVisualizer({
         texture: gl.getUniformLocation(chromaticProgram, "uTexture"),
         resolution: gl.getUniformLocation(chromaticProgram, "uResolution"),
         time: gl.getUniformLocation(chromaticProgram, "uTime"),
+      };
+      glowUniforms = {
+        texture: gl.getUniformLocation(glowProgram, "uTexture"),
+        resolution: gl.getUniformLocation(glowProgram, "uResolution"),
+        glowStrength: gl.getUniformLocation(glowProgram, "uGlowStrength"),
+        glowRadius: gl.getUniformLocation(glowProgram, "uGlowRadius"),
+        radialStrength: gl.getUniformLocation(glowProgram, "uRadialStrength"),
+        radialFalloff: gl.getUniformLocation(glowProgram, "uRadialFalloff"),
       };
     }
 
