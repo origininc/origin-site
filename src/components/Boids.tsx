@@ -218,7 +218,7 @@ const LIFE_SIM_PRESET: Preset = {
   wCoh: 1.0,
   wSep: 1.0,
   wMouse: 0.6,
-  pixelSize: 3,
+  pixelSize: 5,
   mouseRadius: 105,
   mouseOuterFactor: 1.2,
   mouseFleeMult: 6.5,
@@ -365,7 +365,7 @@ export default function Boids() {
 
   const ENABLE_HORIZONTAL_BLUR = true;
   const ENABLE_ASCII = true;
-  const ENABLE_CHROMATIC = false;
+  const ENABLE_CHROMATIC = true;
 
   const rand = (min: number, max: number) => Math.random() * (max - min) + min;
 
@@ -1686,7 +1686,7 @@ export default function Boids() {
     
             const mouse = mouseRef.current ?? { x: w * 0.5, y: 0 };
             gl.uniform2f(asciiUniforms.mouse, mouse.x, mouse.y);
-            gl.uniform1f(asciiUniforms.pixelation, 0.5);
+            gl.uniform1f(asciiUniforms.pixelation, 1.0);
           },
           currentTexture
         );
@@ -1704,7 +1704,6 @@ export default function Boids() {
         );
       }
     
-      // Present final texture to screen with plain copy shader
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, rw, rh);
       gl.useProgram(copyProgram);
