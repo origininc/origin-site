@@ -386,11 +386,8 @@ const COUNTS = [600, 1200, 2000, 2500, 3000] as const;
 export default function Boids() {
   const simCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const glCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [countIndex, setCountIndex] = useState(1);
-
-  const [mouseMode, setMouseMode] = useState<MouseMode>("seek");
-  const mouseModeRef = useRef<MouseMode>("seek");
-  mouseModeRef.current = mouseMode;
+  const countIndex = 1;
+  const mouseModeRef = useRef<MouseMode>("off");
 
   const presetRef = useRef<Preset>(LIFE_SIM_PRESET);
   presetRef.current = LIFE_SIM_PRESET;
@@ -1806,11 +1803,35 @@ export default function Boids() {
   
     const onMove = (e: MouseEvent) => {
       const rect = glCanvas.getBoundingClientRect();
-      mouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      const xNorm = clamp((e.clientX - rect.left) / Math.max(1, rect.width), 0, 1);
+      const yNorm = clamp((e.clientY - rect.top) / Math.max(1, rect.height), 0, 1);
+      const { w, h } = sizeRef.current;
+      mouseRef.current = { x: xNorm * w, y: yNorm * h };
     };
   
     const onLeave = () => {
       mouseRef.current = null;
+      mouseModeRef.current = "off";
+    };
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button === 0) {
+        mouseModeRef.current = "flee";
+      } else if (e.button === 2) {
+        mouseModeRef.current = "seek";
+      }
+    };
+
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button === 0 && mouseModeRef.current === "flee") {
+        mouseModeRef.current = "off";
+      } else if (e.button === 2 && mouseModeRef.current === "seek") {
+        mouseModeRef.current = "off";
+      }
+    };
+
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
     };
   
     const onResize = () => {
@@ -1823,6 +1844,9 @@ export default function Boids() {
     window.addEventListener("resize", onResize);
     glCanvas.addEventListener("mousemove", onMove);
     glCanvas.addEventListener("mouseleave", onLeave);
+    glCanvas.addEventListener("mousedown", onMouseDown);
+    glCanvas.addEventListener("mouseup", onMouseUp);
+    glCanvas.addEventListener("contextmenu", onContextMenu);
   
     runningRef.current = true;
     let raf = 0;
@@ -1844,6 +1868,9 @@ export default function Boids() {
       window.removeEventListener("resize", onResize);
       glCanvas.removeEventListener("mousemove", onMove);
       glCanvas.removeEventListener("mouseleave", onLeave);
+      glCanvas.removeEventListener("mousedown", onMouseDown);
+      glCanvas.removeEventListener("mouseup", onMouseUp);
+      glCanvas.removeEventListener("contextmenu", onContextMenu);
   
       gl.deleteFramebuffer(passAFramebuffer);
       gl.deleteFramebuffer(passBFramebuffer);
@@ -1863,11 +1890,6 @@ export default function Boids() {
     resetBoids();
   }, [countIndex]);
 
-  const cycleMouseMode = () =>
-    setMouseMode((m) =>
-      m === "seek" ? "flee" : m === "flee" ? "follow" : m === "follow" ? "off" : "seek"
-    );
-
     return (
       <div className="container">
         <video
@@ -1878,25 +1900,7 @@ export default function Boids() {
           loop
           playsInline
         />
-    
-        <div className="controls">
-          <button
-            className="button"
-            onClick={cycleMouseMode}
-            title="Cycle mouse interaction: Seek → Flee → Follow → Off"
-          >
-            {`Mouse: ${mouseMode.charAt(0).toUpperCase() + mouseMode.slice(1)}`}
-          </button>
-    
-          <button
-            className="button"
-            onClick={() => setCountIndex((i) => (i + 1) % COUNTS.length)}
-            title="Cycle boid count"
-          >
-            Boids: {COUNTS[countIndex]}
-          </button>
-        </div>
-    
+
         <canvas ref={simCanvasRef} className="simCanvas" />
         <canvas ref={glCanvasRef} className="canvas" />
     
@@ -1910,12 +1914,16 @@ export default function Boids() {
           }
     
           .canvas,
-          .simCanvas,
-          .leavesVideo {
+          .simCanvas {
             position: absolute;
             inset: 0;
             width: 100%;
             height: 100%;
+            display: block;
+          }
+
+          .leavesVideo {
+            position: absolute;
             display: block;
           }
     
@@ -1930,38 +1938,14 @@ export default function Boids() {
     
           .leavesVideo {
             z-index: 2;
-            object-fit: cover;
+            top: -300;
+            left: 0;
+            width: 100%;
+            height: auto;
             pointer-events: none;
             mix-blend-mode: multiply;
+            opacity: 0.7;
           }
-    
-          .controls {
-            position: absolute;
-            top: 12px;
-            left: 12px;
-            z-index: 10;
-            pointer-events: none;
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-          }
-    
-          .button {
-            pointer-events: auto;
-            background: #000;
-            color: #fff;
-            border: none;
-            padding: 8px 12px;
-            font-size: 12px;
-            line-height: 1;
-            cursor: pointer;
-            opacity: 0.9;
-            transition: opacity 120ms ease, transform 80ms ease;
-            border-radius: 8px;
-          }
-    
-          .button:hover { opacity: 1; }
-          .button:active { transform: scale(0.95); }
         `}</style>
       </div>
     );

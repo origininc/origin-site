@@ -58,9 +58,12 @@ void main() {
   float cavity = smoothstep(0.0, 0.22, hC);
   float shadow = (1.0 - ndl) * uShadowStrength * cavity;
 
+  // Cold shadow tint: subtract more from warm channels, less from blue
+  vec3 shadowTint = vec3(1.08, 1.02, 0.7);
+
   vec3 color = uBaseColor;
   color *= (uAmbient + diffuse);
-  color -= shadow;
+  color -= shadow * shadowTint;
   color += specular;
 
   gl_FragColor = vec4(color, 1.0);
