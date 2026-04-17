@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import type { BoidsStudioSettings } from "@/lib/studioModes";
+import { BOIDS_STUDIO_DENSITY_COUNTS } from "@/lib/studioModes";
+import type { MutableRefObject } from "react";
+import { useEffect, useRef } from "react";
 
 import {
   temporalChromaticAberrationFrag,
@@ -353,23 +356,60 @@ const LIFE_SIM_PRESET: Preset = {
   },
 };
 
-const COUNTS = [600, 1200, 2000, 2500, 3000] as const;
+const COUNTS = BOIDS_STUDIO_DENSITY_COUNTS;
 
 type BoidsProps = {
-  disperse?: number; 
+  className?: string;
+  disperse?: number;
+  interactionTargetRef?: MutableRefObject<HTMLElement | null>;
+  renderMode?: "full" | "source";
+  sourceCanvasRef?: MutableRefObject<HTMLCanvasElement | null>;
+  studioSettings?: BoidsStudioSettings;
 };
 
-export default function Boids({ disperse = 0 }: BoidsProps) {
+const createEffectivePreset = (studioSettings?: BoidsStudioSettings): Preset => {
+  if (!studioSettings) {
+    return LIFE_SIM_PRESET;
+  }
+
+  const speed = studioSettings.speed;
+  const flocking = studioSettings.flocking;
+  const separation = studioSettings.separation;
+
+  return {
+    ...LIFE_SIM_PRESET,
+    maxSpeed: LIFE_SIM_PRESET.maxSpeed * speed,
+    desiredSeparation: LIFE_SIM_PRESET.desiredSeparation * separation,
+    pixelSize: studioSettings.size,
+    wAlign: LIFE_SIM_PRESET.wAlign * flocking,
+    wCoh: LIFE_SIM_PRESET.wCoh * flocking,
+    wSep: LIFE_SIM_PRESET.wSep * separation,
+    skeleton: {
+      ...LIFE_SIM_PRESET.skeleton,
+      headSpeed: LIFE_SIM_PRESET.skeleton.headSpeed * speed,
+    },
+  };
+};
+
+export default function Boids({
+  className,
+  disperse = 0,
+  interactionTargetRef,
+  renderMode = "full",
+  sourceCanvasRef,
+  studioSettings,
+}: BoidsProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const simCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const glCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [countIndex] = useState(1);
+  const countIndex = studioSettings?.densityIndex ?? 1;
 
   const mouseModeRef = useRef<MouseMode>("off");
   const disperseRef = useRef(0);
   disperseRef.current = disperse;
 
-  const presetRef = useRef<Preset>(LIFE_SIM_PRESET);
-  presetRef.current = LIFE_SIM_PRESET;
+  const presetRef = useRef<Preset>(createEffectivePreset(studioSettings));
+  presetRef.current = createEffectivePreset(studioSettings);
 
   const boidsRef = useRef<Boid[]>([]);
   const mouseRef = useRef<Vec2 | null>(null);
@@ -966,10 +1006,11 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
 
   const resize = () => {
     const simCanvas = simCanvasRef.current!;
-    const glCanvas = glCanvasRef.current!;
+    const glCanvas = glCanvasRef.current;
+    const container = containerRef.current!;
     const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-    const width = Math.max(1, glCanvas.clientWidth);
-    const height = Math.max(1, glCanvas.clientHeight);
+    const width = Math.max(1, container.clientWidth);
+    const height = Math.max(1, container.clientHeight);
 
     sizeRef.current = {
       w: Math.floor(width),
@@ -982,8 +1023,10 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
     simCanvas.style.width = `${width}px`;
     simCanvas.style.height = `${height}px`;
 
-    glCanvas.width = Math.floor(width * dpr);
-    glCanvas.height = Math.floor(height * dpr);
+    if (glCanvas) {
+      glCanvas.width = Math.floor(width * dpr);
+      glCanvas.height = Math.floor(height * dpr);
+    }
   };
 
   const stepBoids = () => {
@@ -1500,99 +1543,96 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
     resize();
     initSkeleton();
     resetBoids();
-  
-    const simCanvas = simCanvasRef.current!;
-    const glCanvas = glCanvasRef.current!;
-    const gl = glCanvas.getContext("webgl", { premultipliedAlpha: false });
-  
-    if (!gl) {
-      throw new Error("WebGL not supported");
+
+    const simCanvas = simCanvasRef.current;
+    const glCanvas = glCanvasRef.current;
+    const interactionTarget =
+      interactionTargetRef?.current ?? (renderMode === "full" ? glCanvas : containerRef.current);
+
+    if (!simCanvas || !interactionTarget) {
+      return;
     }
 
-    const copyProgram = createProgram(gl, copyVert, copyFrag);
-  
-    const chromaticProgram = createProgram(
-      gl,
-      temporalChromaticAberrationVert,
-      temporalChromaticAberrationFrag
-    );
-  
-    const asciiProgram = createProgram(
-      gl,
-      asciiPostVert,
-      asciiPostFrag
-    );
+    let gl: WebGLRenderingContext | null = null;
+    let copyProgram: WebGLProgram | null = null;
+    let chromaticProgram: WebGLProgram | null = null;
+    let asciiProgram: WebGLProgram | null = null;
+    let blurProgram: WebGLProgram | null = null;
+    let glowProgram: WebGLProgram | null = null;
+    let vignetteProgram: WebGLProgram | null = null;
+    let quadBuffer: WebGLBuffer | null = null;
+    let sourceTexture: WebGLTexture | null = null;
+    let passATexture: WebGLTexture | null = null;
+    let passAFramebuffer: WebGLFramebuffer | null = null;
+    let passBTexture: WebGLTexture | null = null;
+    let passBFramebuffer: WebGLFramebuffer | null = null;
+    let copyUniforms: { texture: WebGLUniformLocation | null } | null = null;
+    let chromaticUniforms:
+      | {
+          texture: WebGLUniformLocation | null;
+          resolution: WebGLUniformLocation | null;
+          strength: WebGLUniformLocation | null;
+          time: WebGLUniformLocation | null;
+        }
+      | null = null;
+    let asciiUniforms:
+      | {
+          texture: WebGLUniformLocation | null;
+          resolution: WebGLUniformLocation | null;
+          mouse: WebGLUniformLocation | null;
+          pixelation: WebGLUniformLocation | null;
+        }
+      | null = null;
+    let blurUniforms:
+      | {
+          texture: WebGLUniformLocation | null;
+          resolution: WebGLUniformLocation | null;
+          blurAmount: WebGLUniformLocation | null;
+        }
+      | null = null;
+    let glowUniforms:
+      | {
+          texture: WebGLUniformLocation | null;
+          resolution: WebGLUniformLocation | null;
+          glowStrength: WebGLUniformLocation | null;
+          glowRadius: WebGLUniformLocation | null;
+          radialStrength: WebGLUniformLocation | null;
+          radialFalloff: WebGLUniformLocation | null;
+        }
+      | null = null;
+    let vignetteUniforms:
+      | {
+          texture: WebGLUniformLocation | null;
+          resolution: WebGLUniformLocation | null;
+          strength: WebGLUniformLocation | null;
+          power: WebGLUniformLocation | null;
+          zoom: WebGLUniformLocation | null;
+        }
+      | null = null;
 
-    const blurProgram = createProgram(
-      gl,
-      horizontalBlurVert,
-      horizontalBlurFrag
-    );
-
-    const glowProgram = createProgram(
-      gl,
-      radialGlowVert,
-      radialGlowFrag
-    );
-
-    const vignetteProgram = createProgram(
-      gl,
-      vignetteVert,
-      vignetteFrag
-    );
-  
-    const quadBuffer = gl.createBuffer()!;
-    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([
-        -1, -1,
-         1, -1,
-        -1,  1,
-        -1,  1,
-         1, -1,
-         1,  1,
-      ]),
-      gl.STATIC_DRAW
-    );
-  
     const bindFullscreenQuad = (program: WebGLProgram) => {
+      if (!gl || !quadBuffer) return;
       const positionLoc = gl.getAttribLocation(program, "aPosition");
       gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
       gl.enableVertexAttribArray(positionLoc);
       gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
     };
-  
-    const sourceTexture = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, sourceTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  
-    const passATexture = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, passATexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    
-    const passAFramebuffer = gl.createFramebuffer()!;
-    
-    const passBTexture = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, passBTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    
-    const passBFramebuffer = gl.createFramebuffer()!;
-  
+
     const allocPassTargets = () => {
+      if (
+        !gl ||
+        !passATexture ||
+        !passAFramebuffer ||
+        !passBTexture ||
+        !passBFramebuffer
+      ) {
+        return;
+      }
+
       const { w, h, dpr } = sizeRef.current;
       const rw = Math.max(1, Math.floor(w * dpr));
       const rh = Math.max(1, Math.floor(h * dpr));
-    
+
       gl.bindTexture(gl.TEXTURE_2D, passATexture);
       gl.texImage2D(
         gl.TEXTURE_2D,
@@ -1605,7 +1645,7 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
         gl.UNSIGNED_BYTE,
         null
       );
-    
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, passAFramebuffer);
       gl.framebufferTexture2D(
         gl.FRAMEBUFFER,
@@ -1614,12 +1654,12 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
         passATexture,
         0
       );
-    
+
       let status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
       if (status !== gl.FRAMEBUFFER_COMPLETE) {
         throw new Error(`passA framebuffer incomplete: ${status}`);
       }
-    
+
       gl.bindTexture(gl.TEXTURE_2D, passBTexture);
       gl.texImage2D(
         gl.TEXTURE_2D,
@@ -1632,7 +1672,7 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
         gl.UNSIGNED_BYTE,
         null
       );
-    
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, passBFramebuffer);
       gl.framebufferTexture2D(
         gl.FRAMEBUFFER,
@@ -1641,62 +1681,43 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
         passBTexture,
         0
       );
-    
+
       status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
       if (status !== gl.FRAMEBUFFER_COMPLETE) {
         throw new Error(`passB framebuffer incomplete: ${status}`);
       }
-    
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    };
-  
-    allocPassTargets();
-
-    const copyUniforms = {
-      texture: gl.getUniformLocation(copyProgram, "uTexture"),
-    };
-  
-    const chromaticUniforms = {
-      texture: gl.getUniformLocation(chromaticProgram, "uTexture"),
-      resolution: gl.getUniformLocation(chromaticProgram, "uResolution"),
-      time: gl.getUniformLocation(chromaticProgram, "uTime"),
-    };
-  
-    const asciiUniforms = {
-      texture: gl.getUniformLocation(asciiProgram, "uTexture"),
-      resolution: gl.getUniformLocation(asciiProgram, "uResolution"),
-      mouse: gl.getUniformLocation(asciiProgram, "uMouse"),
-      pixelation: gl.getUniformLocation(asciiProgram, "uPixelation"),
-    };
-
-    const blurUniforms = {
-      texture: gl.getUniformLocation(blurProgram, "uTexture"),
-      resolution: gl.getUniformLocation(blurProgram, "uResolution"),
-      blurAmount: gl.getUniformLocation(blurProgram, "uBlurAmount"),
-    };
-
-    const glowUniforms = {
-      texture: gl.getUniformLocation(glowProgram, "uTexture"),
-      resolution: gl.getUniformLocation(glowProgram, "uResolution"),
-      glowStrength: gl.getUniformLocation(glowProgram, "uGlowStrength"),
-      glowRadius: gl.getUniformLocation(glowProgram, "uGlowRadius"),
-      radialStrength: gl.getUniformLocation(glowProgram, "uRadialStrength"),
-      radialFalloff: gl.getUniformLocation(glowProgram, "uRadialFalloff"),
-    };
-
-    const vignetteUniforms = {
-      texture: gl.getUniformLocation(vignetteProgram, "uTexture"),
-      resolution: gl.getUniformLocation(vignetteProgram, "uResolution"),
-      strength: gl.getUniformLocation(vignetteProgram, "uStrength"),
-      power: gl.getUniformLocation(vignetteProgram, "uPower"),
-      zoom: gl.getUniformLocation(vignetteProgram, "uZoom"),
     };
 
     const renderPost = (timeMs: number) => {
+      if (
+        !gl ||
+        !copyProgram ||
+        !chromaticProgram ||
+        !asciiProgram ||
+        !blurProgram ||
+        !glowProgram ||
+        !vignetteProgram ||
+        !copyUniforms ||
+        !chromaticUniforms ||
+        !asciiUniforms ||
+        !blurUniforms ||
+        !glowUniforms ||
+        !vignetteUniforms ||
+        !sourceTexture ||
+        !passATexture ||
+        !passAFramebuffer ||
+        !passBTexture ||
+        !passBFramebuffer
+      ) {
+        return;
+      }
+
       const { w, h, dpr } = sizeRef.current;
       const rw = Math.max(1, Math.floor(w * dpr));
       const rh = Math.max(1, Math.floor(h * dpr));
-    
+
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sourceTexture);
@@ -1708,67 +1729,68 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
         gl.UNSIGNED_BYTE,
         simCanvas
       );
-    
+
       let currentTexture = sourceTexture;
       let writeToA = true;
-    
+
       const renderPassToFbo = (
         program: WebGLProgram,
         uniforms: () => void,
         inputTexture: WebGLTexture
       ) => {
-        const targetFramebuffer = writeToA ? passAFramebuffer : passBFramebuffer;
-        const targetTexture = writeToA ? passATexture : passBTexture;
-    
-        gl.bindFramebuffer(gl.FRAMEBUFFER, targetFramebuffer);
-        gl.viewport(0, 0, rw, rh);
-        gl.useProgram(program);
+        const targetFramebuffer = writeToA ? passAFramebuffer! : passBFramebuffer!;
+        const targetTexture = writeToA ? passATexture! : passBTexture!;
+
+        gl!.bindFramebuffer(gl!.FRAMEBUFFER, targetFramebuffer);
+        gl!.viewport(0, 0, rw, rh);
+        gl!.useProgram(program);
         bindFullscreenQuad(program);
-    
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, inputTexture);
+
+        gl!.activeTexture(gl!.TEXTURE0);
+        gl!.bindTexture(gl!.TEXTURE_2D, inputTexture);
         uniforms();
-    
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-    
+
+        gl!.drawArrays(gl!.TRIANGLES, 0, 6);
+
         currentTexture = targetTexture;
         writeToA = !writeToA;
       };
-    
+
       if (ENABLE_HORIZONTAL_BLUR) {
         renderPassToFbo(
           blurProgram,
           () => {
-            gl.uniform1i(blurUniforms.texture, 0);
-            gl.uniform2f(blurUniforms.resolution, w, h);
-            gl.uniform1f(blurUniforms.blurAmount, 6.0);
+            gl!.uniform1i(blurUniforms!.texture, 0);
+            gl!.uniform2f(blurUniforms!.resolution, w, h);
+            gl!.uniform1f(blurUniforms!.blurAmount, 6.0);
           },
           currentTexture
         );
       }
-    
+
       if (ENABLE_ASCII) {
         renderPassToFbo(
           asciiProgram,
           () => {
-            gl.uniform1i(asciiUniforms.texture, 0);
-            gl.uniform2f(asciiUniforms.resolution, w, h);
-    
+            gl!.uniform1i(asciiUniforms!.texture, 0);
+            gl!.uniform2f(asciiUniforms!.resolution, w, h);
+
             const mouse = mouseRef.current ?? { x: w * 0.5, y: 0 };
-            gl.uniform2f(asciiUniforms.mouse, mouse.x, mouse.y);
-            gl.uniform1f(asciiUniforms.pixelation, 1.0);
+            gl!.uniform2f(asciiUniforms!.mouse, mouse.x, mouse.y);
+            gl!.uniform1f(asciiUniforms!.pixelation, 1.0);
           },
           currentTexture
         );
       }
-    
+
       if (ENABLE_CHROMATIC) {
         renderPassToFbo(
           chromaticProgram,
           () => {
-            gl.uniform1i(chromaticUniforms.texture, 0);
-            gl.uniform1f(chromaticUniforms.time, timeMs * 0.001);
-            gl.uniform2f(chromaticUniforms.resolution, w, h);
+            gl!.uniform1i(chromaticUniforms!.texture, 0);
+            gl!.uniform1f(chromaticUniforms!.time, timeMs * 0.001);
+            gl!.uniform2f(chromaticUniforms!.resolution, w, h);
+            gl!.uniform1f(chromaticUniforms!.strength, 0.003);
           },
           currentTexture
         );
@@ -1778,12 +1800,12 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
         renderPassToFbo(
           glowProgram,
           () => {
-            gl.uniform1i(glowUniforms.texture, 0);
-            gl.uniform2f(glowUniforms.resolution, w, h);
-            gl.uniform1f(glowUniforms.glowStrength, 1.35);
-            gl.uniform1f(glowUniforms.glowRadius, 6.0);
-            gl.uniform1f(glowUniforms.radialStrength, 2.0);
-            gl.uniform1f(glowUniforms.radialFalloff, 1.65);
+            gl!.uniform1i(glowUniforms!.texture, 0);
+            gl!.uniform2f(glowUniforms!.resolution, w, h);
+            gl!.uniform1f(glowUniforms!.glowStrength, 1.35);
+            gl!.uniform1f(glowUniforms!.glowRadius, 6.0);
+            gl!.uniform1f(glowUniforms!.radialStrength, 2.0);
+            gl!.uniform1f(glowUniforms!.radialFalloff, 1.65);
           },
           currentTexture
         );
@@ -1793,60 +1815,163 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
         renderPassToFbo(
           vignetteProgram,
           () => {
-            gl.uniform1i(vignetteUniforms.texture, 0);
-            gl.uniform2f(vignetteUniforms.resolution, w, h);
-            gl.uniform1f(vignetteUniforms.strength, 3.0);
-            gl.uniform1f(vignetteUniforms.power, 1.1);
-            gl.uniform1f(vignetteUniforms.zoom, 1.5);
-
+            gl!.uniform1i(vignetteUniforms!.texture, 0);
+            gl!.uniform2f(vignetteUniforms!.resolution, w, h);
+            gl!.uniform1f(vignetteUniforms!.strength, 3.0);
+            gl!.uniform1f(vignetteUniforms!.power, 1.1);
+            gl!.uniform1f(vignetteUniforms!.zoom, 1.5);
           },
           currentTexture
         );
       }
-    
+
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, rw, rh);
       gl.useProgram(copyProgram);
       bindFullscreenQuad(copyProgram);
-    
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, currentTexture);
       gl.uniform1i(copyUniforms.texture, 0);
-    
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     };
-  
-    const onMove = (e: MouseEvent) => {
-      const rect = glCanvas.getBoundingClientRect();
-      const xNorm = clamp((e.clientX - rect.left) / Math.max(1, rect.width), 0, 1);
-      const yNorm = clamp((e.clientY - rect.top) / Math.max(1, rect.height), 0, 1);
+
+    if (renderMode === "full") {
+      if (!glCanvas) {
+        return;
+      }
+
+      gl = glCanvas.getContext("webgl", { premultipliedAlpha: false });
+      if (!gl) {
+        throw new Error("WebGL not supported");
+      }
+
+      copyProgram = createProgram(gl, copyVert, copyFrag);
+      chromaticProgram = createProgram(
+        gl,
+        temporalChromaticAberrationVert,
+        temporalChromaticAberrationFrag
+      );
+      asciiProgram = createProgram(gl, asciiPostVert, asciiPostFrag);
+      blurProgram = createProgram(gl, horizontalBlurVert, horizontalBlurFrag);
+      glowProgram = createProgram(gl, radialGlowVert, radialGlowFrag);
+      vignetteProgram = createProgram(gl, vignetteVert, vignetteFrag);
+
+      quadBuffer = gl.createBuffer()!;
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array([
+          -1, -1,
+           1, -1,
+          -1,  1,
+          -1,  1,
+           1, -1,
+           1,  1,
+        ]),
+        gl.STATIC_DRAW
+      );
+
+      sourceTexture = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, sourceTexture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+      passATexture = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, passATexture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      passAFramebuffer = gl.createFramebuffer()!;
+
+      passBTexture = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, passBTexture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      passBFramebuffer = gl.createFramebuffer()!;
+
+      allocPassTargets();
+
+      copyUniforms = {
+        texture: gl.getUniformLocation(copyProgram, "uTexture"),
+      };
+      chromaticUniforms = {
+        texture: gl.getUniformLocation(chromaticProgram, "uTexture"),
+        resolution: gl.getUniformLocation(chromaticProgram, "uResolution"),
+        strength: gl.getUniformLocation(chromaticProgram, "uStrength"),
+        time: gl.getUniformLocation(chromaticProgram, "uTime"),
+      };
+      asciiUniforms = {
+        texture: gl.getUniformLocation(asciiProgram, "uTexture"),
+        resolution: gl.getUniformLocation(asciiProgram, "uResolution"),
+        mouse: gl.getUniformLocation(asciiProgram, "uMouse"),
+        pixelation: gl.getUniformLocation(asciiProgram, "uPixelation"),
+      };
+      blurUniforms = {
+        texture: gl.getUniformLocation(blurProgram, "uTexture"),
+        resolution: gl.getUniformLocation(blurProgram, "uResolution"),
+        blurAmount: gl.getUniformLocation(blurProgram, "uBlurAmount"),
+      };
+      glowUniforms = {
+        texture: gl.getUniformLocation(glowProgram, "uTexture"),
+        resolution: gl.getUniformLocation(glowProgram, "uResolution"),
+        glowStrength: gl.getUniformLocation(glowProgram, "uGlowStrength"),
+        glowRadius: gl.getUniformLocation(glowProgram, "uGlowRadius"),
+        radialStrength: gl.getUniformLocation(glowProgram, "uRadialStrength"),
+        radialFalloff: gl.getUniformLocation(glowProgram, "uRadialFalloff"),
+      };
+      vignetteUniforms = {
+        texture: gl.getUniformLocation(vignetteProgram, "uTexture"),
+        resolution: gl.getUniformLocation(vignetteProgram, "uResolution"),
+        strength: gl.getUniformLocation(vignetteProgram, "uStrength"),
+        power: gl.getUniformLocation(vignetteProgram, "uPower"),
+        zoom: gl.getUniformLocation(vignetteProgram, "uZoom"),
+      };
+    }
+
+    const onMove = (event: MouseEvent) => {
+      const rect = interactionTarget.getBoundingClientRect();
+      const xNorm = clamp(
+        (event.clientX - rect.left) / Math.max(1, rect.width),
+        0,
+        1
+      );
+      const yNorm = clamp(
+        (event.clientY - rect.top) / Math.max(1, rect.height),
+        0,
+        1
+      );
       const { w, h } = sizeRef.current;
       mouseRef.current = { x: xNorm * w, y: yNorm * h };
     };
-  
+
     const onLeave = () => {
       mouseRef.current = null;
       mouseModeRef.current = "off";
     };
 
-    const onMouseDown = (e: MouseEvent) => {
-      if (e.button === 0) {
+    const onMouseDown = (event: MouseEvent) => {
+      if (event.button === 0) {
         mouseModeRef.current = "flee";
-      } else if (e.button === 2) {
+      } else if (event.button === 2) {
         mouseModeRef.current = "seek";
       }
     };
 
-    const onMouseUp = (e: MouseEvent) => {
-      if (e.button === 0 && mouseModeRef.current === "flee") {
+    const onMouseUp = (event: MouseEvent) => {
+      if (event.button === 0 && mouseModeRef.current === "flee") {
         mouseModeRef.current = "off";
-      } else if (e.button === 2 && mouseModeRef.current === "seek") {
+      } else if (event.button === 2 && mouseModeRef.current === "seek") {
         mouseModeRef.current = "off";
       }
     };
 
-    const onContextMenu = (e: MouseEvent) => {
-      e.preventDefault();
+    const onContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
     };
 
     const onResize = () => {
@@ -1857,12 +1982,12 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
     };
 
     window.addEventListener("resize", onResize);
-    glCanvas.addEventListener("mousemove", onMove);
-    glCanvas.addEventListener("mouseleave", onLeave);
-    glCanvas.addEventListener("mousedown", onMouseDown);
-    glCanvas.addEventListener("mouseup", onMouseUp);
-    glCanvas.addEventListener("contextmenu", onContextMenu);
-  
+    interactionTarget.addEventListener("mousemove", onMove);
+    interactionTarget.addEventListener("mouseleave", onLeave);
+    interactionTarget.addEventListener("mousedown", onMouseDown);
+    interactionTarget.addEventListener("mouseup", onMouseUp);
+    interactionTarget.addEventListener("contextmenu", onContextMenu);
+
     runningRef.current = true;
     let raf = 0;
 
@@ -1871,37 +1996,47 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
 
       step();
       draw();
-      renderPost(time);
+      if (renderMode === "full") {
+        renderPost(time);
+      }
       raf = requestAnimationFrame(loop);
     };
-  
+
     raf = requestAnimationFrame(loop);
-  
+
     return () => {
       runningRef.current = false;
       cancelAnimationFrame(raf);
-  
+
       window.removeEventListener("resize", onResize);
-      glCanvas.removeEventListener("mousemove", onMove);
-      glCanvas.removeEventListener("mouseleave", onLeave);
-      glCanvas.removeEventListener("mousedown", onMouseDown);
-      glCanvas.removeEventListener("mouseup", onMouseUp);
-      glCanvas.removeEventListener("contextmenu", onContextMenu);
-  
-      gl.deleteFramebuffer(passAFramebuffer);
-      gl.deleteFramebuffer(passBFramebuffer);
-      gl.deleteTexture(passATexture);
-      gl.deleteTexture(passBTexture);
-      gl.deleteTexture(sourceTexture);
-      gl.deleteBuffer(quadBuffer);
-      gl.deleteProgram(blurProgram);
-      gl.deleteProgram(asciiProgram);
-      gl.deleteProgram(chromaticProgram);
-      gl.deleteProgram(glowProgram);
-      gl.deleteProgram(vignetteProgram);
-      gl.deleteProgram(copyProgram);
+      interactionTarget.removeEventListener("mousemove", onMove);
+      interactionTarget.removeEventListener("mouseleave", onLeave);
+      interactionTarget.removeEventListener("mousedown", onMouseDown);
+      interactionTarget.removeEventListener("mouseup", onMouseUp);
+      interactionTarget.removeEventListener("contextmenu", onContextMenu);
+
+      if (sourceCanvasRef) {
+        sourceCanvasRef.current = null;
+      }
+
+      if (!gl) {
+        return;
+      }
+
+      if (passAFramebuffer) gl.deleteFramebuffer(passAFramebuffer);
+      if (passBFramebuffer) gl.deleteFramebuffer(passBFramebuffer);
+      if (passATexture) gl.deleteTexture(passATexture);
+      if (passBTexture) gl.deleteTexture(passBTexture);
+      if (sourceTexture) gl.deleteTexture(sourceTexture);
+      if (quadBuffer) gl.deleteBuffer(quadBuffer);
+      if (blurProgram) gl.deleteProgram(blurProgram);
+      if (asciiProgram) gl.deleteProgram(asciiProgram);
+      if (chromaticProgram) gl.deleteProgram(chromaticProgram);
+      if (glowProgram) gl.deleteProgram(glowProgram);
+      if (vignetteProgram) gl.deleteProgram(vignetteProgram);
+      if (copyProgram) gl.deleteProgram(copyProgram);
     };
-  }, []);
+  }, [interactionTargetRef, renderMode, sourceCanvasRef]);
 
   useEffect(() => {
     initSkeleton();
@@ -1909,8 +2044,21 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
   }, [countIndex]);
 
   return (
-    <div className="container">
-      <canvas ref={simCanvasRef} className="simCanvas" />
+    <div
+      ref={containerRef}
+      className={`container ${className ?? ""} ${
+        renderMode === "source" ? "containerSource" : ""
+      }`}
+    >
+      <canvas
+        ref={(node) => {
+          simCanvasRef.current = node;
+          if (sourceCanvasRef) {
+            sourceCanvasRef.current = node;
+          }
+        }}
+        className="simCanvas"
+      />
       <canvas ref={glCanvasRef} className="canvas" />
 
       <style jsx>{`
@@ -1924,8 +2072,11 @@ export default function Boids({ disperse = 0 }: BoidsProps) {
           display: block;
         }
         .simCanvas {
-          visibility: hidden;
+          visibility: ${renderMode === "source" ? "visible" : "hidden"};
           pointer-events: none;
+        }
+        .containerSource .canvas {
+          display: none;
         }
       `}</style>
     </div>

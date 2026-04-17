@@ -15,6 +15,7 @@ precision mediump float;
 
 uniform sampler2D uTexture;
 uniform vec2 uResolution;
+uniform float uStrength;
 uniform float uTime;
 
 varying vec2 vUv;
@@ -25,7 +26,7 @@ void main() {
   vec2 centered = uv - 0.5;
   float dist = length(centered);
 
-  float aberration = 0.003 * smoothstep(0.25, 1.0, dist);
+  float aberration = uStrength * smoothstep(0.25, 1.0, dist);
 
   vec2 dir = dist > 0.0 ? centered / dist : vec2(0.0);
 

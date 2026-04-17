@@ -1,5 +1,7 @@
 "use client";
 
+import type { CymaticsStudioSettings } from "@/lib/studioModes";
+import type { MutableRefObject } from "react";
 import {
   asciiPostFrag,
   asciiPostVert,
@@ -19,8 +21,12 @@ import {
 } from "@/components/shaders/radialGlow";
 
 type CymaticVisualizerProps = {
+  className?: string;
   value: number;
   opacity?: number;
+  renderMode?: "full" | "source";
+  sourceCanvasRef?: MutableRefObject<HTMLCanvasElement | null>;
+  studioSettings?: CymaticsStudioSettings;
 };
 
 type ModePair = {
@@ -215,6 +221,12 @@ const getPulseLegacyBlend = (value: number) => {
   return intoPulse * (1 - outOfPulse);
 };
 
+const getColorValueFromModePair = (mode: ModePair) => {
+  const combined = mode.n + mode.m;
+  const normalized = clamp((combined - 2) / 12, 0, 1);
+  return 1 + normalized * (AGENT_COLORS.length - 1);
+};
+
 const chladni = (x: number, y: number, mode: ModePair) => {
   const scale = Math.PI * 0.5;
   return (
@@ -230,8 +242,16 @@ const fieldValue = (x: number, y: number, value: number) => {
   return lerp(fa, fb, mix);
 };
 
+const fieldValueForMode = (x: number, y: number, mode: ModePair) =>
+  chladni(x, y, mode);
+
 const fieldEnergy = (x: number, y: number, value: number) => {
   const field = fieldValue(x, y, value);
+  return field * field;
+};
+
+const fieldEnergyForMode = (x: number, y: number, mode: ModePair) => {
+  const field = fieldValueForMode(x, y, mode);
   return field * field;
 };
 
@@ -249,6 +269,20 @@ const sampleEnergyGradient = (x: number, y: number, value: number) => {
   return { energy, gradientX, gradientY };
 };
 
+const sampleEnergyGradientForMode = (x: number, y: number, mode: ModePair) => {
+  const energy = fieldEnergyForMode(x, y, mode);
+  const gradientX = (
+    fieldEnergyForMode(x + FIELD_EPSILON, y, mode) -
+    fieldEnergyForMode(x - FIELD_EPSILON, y, mode)
+  ) / (FIELD_EPSILON * 2);
+  const gradientY = (
+    fieldEnergyForMode(x, y + FIELD_EPSILON, mode) -
+    fieldEnergyForMode(x, y - FIELD_EPSILON, mode)
+  ) / (FIELD_EPSILON * 2);
+
+  return { energy, gradientX, gradientY };
+};
+
 const projectTowardNode = (x: number, y: number, value: number) => {
   const source = sampleEnergyGradient(x, y, value);
   let projectedX = x;
@@ -258,6 +292,35 @@ const projectTowardNode = (x: number, y: number, value: number) => {
 
   for (let step = 0; step < NODE_PROJECTION_STEPS; step++) {
     const sample = sampleEnergyGradient(projectedX, projectedY, value);
+    gradientX = sample.gradientX;
+    gradientY = sample.gradientY;
+
+    const gradientMag = Math.hypot(gradientX, gradientY);
+    if (gradientMag < 1e-6) break;
+
+    const stepSize = clamp(Math.sqrt(sample.energy) * 0.16, 0.014, 0.12);
+    projectedX = clamp(projectedX - (gradientX / gradientMag) * stepSize, -1, 1);
+    projectedY = clamp(projectedY - (gradientY / gradientMag) * stepSize, -1, 1);
+  }
+
+  return {
+    gradientX,
+    gradientY,
+    sourceEnergy: source.energy,
+    x: projectedX,
+    y: projectedY,
+  };
+};
+
+const projectTowardNodeForMode = (x: number, y: number, mode: ModePair) => {
+  const source = sampleEnergyGradientForMode(x, y, mode);
+  let projectedX = x;
+  let projectedY = y;
+  let gradientX = source.gradientX;
+  let gradientY = source.gradientY;
+
+  for (let step = 0; step < NODE_PROJECTION_STEPS; step++) {
+    const sample = sampleEnergyGradientForMode(projectedX, projectedY, mode);
     gradientX = sample.gradientX;
     gradientY = sample.gradientY;
 
@@ -295,8 +358,12 @@ const randomParticle = (): Particle => {
 };
 
 export default function CymaticVisualizer({
+  className,
   value,
   opacity = 1,
+  renderMode = "full",
+  sourceCanvasRef,
+  studioSettings,
 }: CymaticVisualizerProps) {
   const frameRef = useRef(0);
   const squareRef = useRef<HTMLDivElement | null>(null);
@@ -315,27 +382,48 @@ export default function CymaticVisualizer({
   const targetValueRef = useRef(value);
   const simValueRef = useRef(value);
   const opacityRef = useRef(opacity);
+  const harmonicMRef = useRef(studioSettings?.harmonicM ?? MODES[0].m);
+  const harmonicNRef = useRef(studioSettings?.harmonicN ?? MODES[0].n);
+  const mainHueRef = useRef(studioSettings?.mainHue ?? 0);
+  const nodePullRef = useRef(studioSettings?.nodePull ?? NODE_PULL_MIX);
+  const hueShiftRef = useRef(studioSettings?.hueShift ?? HUE_SHIFT_MAX);
+  const densityMultiplier = studioSettings?.particleDensity ?? 1;
 
   targetValueRef.current = value;
   opacityRef.current = opacity;
+  harmonicMRef.current = studioSettings?.harmonicM ?? MODES[0].m;
+  harmonicNRef.current = studioSettings?.harmonicN ?? MODES[0].n;
+  mainHueRef.current = studioSettings?.mainHue ?? 0;
+  nodePullRef.current = studioSettings?.nodePull ?? NODE_PULL_MIX;
+  hueShiftRef.current = studioSettings?.hueShift ?? HUE_SHIFT_MAX;
 
   useEffect(() => {
     const square = squareRef.current;
     const simCanvas = simCanvasRef.current;
     const glCanvas = glCanvasRef.current;
-    if (!square || !simCanvas || !glCanvas) return;
+    if (!square || !simCanvas) return;
 
     const ctx = simCanvas.getContext("2d");
     if (!ctx) return;
 
-    const gl = glCanvas.getContext("webgl", { alpha: true, premultipliedAlpha: false });
+    const gl =
+      renderMode === "full" && glCanvas
+        ? glCanvas.getContext("webgl", {
+            alpha: true,
+            premultipliedAlpha: false,
+          })
+        : null;
 
     if (gl) {
       simCanvas.style.visibility = "hidden";
-      glCanvas.style.display = "block";
+      if (glCanvas) {
+        glCanvas.style.display = "block";
+      }
     } else {
       simCanvas.style.visibility = "visible";
-      glCanvas.style.display = "none";
+      if (glCanvas) {
+        glCanvas.style.display = "none";
+      }
     }
 
     const createShader = (
@@ -411,6 +499,7 @@ export default function CymaticVisualizer({
     let chromaticUniforms:
       | {
           resolution: WebGLUniformLocation | null;
+          strength: WebGLUniformLocation | null;
           texture: WebGLUniformLocation | null;
           time: WebGLUniformLocation | null;
         }
@@ -606,6 +695,7 @@ export default function CymaticVisualizer({
           gl.uniform1i(localChromaticUniforms.texture, 0);
           gl.uniform1f(localChromaticUniforms.time, timeMs * 0.001);
           gl.uniform2f(localChromaticUniforms.resolution, renderW, renderH);
+          gl.uniform1f(localChromaticUniforms.strength, 0.003);
         },
         currentTexture
       );
@@ -706,6 +796,7 @@ export default function CymaticVisualizer({
       chromaticUniforms = {
         texture: gl.getUniformLocation(chromaticProgram, "uTexture"),
         resolution: gl.getUniformLocation(chromaticProgram, "uResolution"),
+        strength: gl.getUniformLocation(chromaticProgram, "uStrength"),
         time: gl.getUniformLocation(chromaticProgram, "uTime"),
       };
       glowUniforms = {
@@ -734,12 +825,14 @@ export default function CymaticVisualizer({
       simCanvas.style.left = `${-padX}px`;
       simCanvas.style.top = `${-padY}px`;
 
-      glCanvas.width = Math.floor(renderWidth * dpr);
-      glCanvas.height = Math.floor(renderHeight * dpr);
-      glCanvas.style.width = `${renderWidth}px`;
-      glCanvas.style.height = `${renderHeight}px`;
-      glCanvas.style.left = `${-padX}px`;
-      glCanvas.style.top = `${-padY}px`;
+      if (glCanvas) {
+        glCanvas.width = Math.floor(renderWidth * dpr);
+        glCanvas.height = Math.floor(renderHeight * dpr);
+        glCanvas.style.width = `${renderWidth}px`;
+        glCanvas.style.height = `${renderHeight}px`;
+        glCanvas.style.left = `${-padX}px`;
+        glCanvas.style.top = `${-padY}px`;
+      }
 
       sizeRef.current = {
         dpr,
@@ -753,9 +846,9 @@ export default function CymaticVisualizer({
       allocPassTargets();
 
       const particleCount = clamp(
-        Math.round((viewWidth * viewHeight) / 150),
-        1100,
-        2200
+        Math.round(((viewWidth * viewHeight) / 150) * densityMultiplier),
+        500,
+        4400
       );
       particlesRef.current = Array.from({ length: particleCount }, randomParticle);
     };
@@ -790,17 +883,31 @@ export default function CymaticVisualizer({
 
       const particles = particlesRef.current;
       const edge = 0.97;
-      const agentColor = getBlendedAgentColor(simValueRef.current);
+      const customMode = studioSettings
+        ? {
+            n: harmonicNRef.current,
+            m: harmonicMRef.current,
+          }
+        : null;
+      const baseAgentColor = getBlendedAgentColor(
+        customMode ? getColorValueFromModePair(customMode) : simValueRef.current
+      );
+      const agentColor = shiftHue(baseAgentColor, mainHueRef.current / 360);
+      const pulseLegacyBlend = customMode
+        ? 0
+        : getPulseLegacyBlend(simValueRef.current);
 
       for (let i = 0; i < particles.length; i++) {
         const particle = particles[i];
-        const projection = projectTowardNode(
-          particle.homeX,
-          particle.homeY,
-          simValueRef.current
-        );
-        const desiredX = lerp(particle.homeX, projection.x, NODE_PULL_MIX);
-        const desiredY = lerp(particle.homeY, projection.y, NODE_PULL_MIX);
+        const projection = customMode
+          ? projectTowardNodeForMode(particle.homeX, particle.homeY, customMode)
+          : projectTowardNode(
+              particle.homeX,
+              particle.homeY,
+              simValueRef.current
+            );
+        const desiredX = lerp(particle.homeX, projection.x, nodePullRef.current);
+        const desiredY = lerp(particle.homeY, projection.y, nodePullRef.current);
         const gradientMag = Math.hypot(projection.gradientX, projection.gradientY) || 1e-6;
         const tangentX = -projection.gradientY / gradientMag;
         const tangentY = projection.gradientX / gradientMag;
@@ -851,11 +958,9 @@ export default function CymaticVisualizer({
           particle.vy *= -0.35;
         }
 
-        particle.energy = fieldEnergy(
-          particle.x,
-          particle.y,
-          simValueRef.current
-        );
+        particle.energy = customMode
+          ? fieldEnergyForMode(particle.x, particle.y, customMode)
+          : fieldEnergy(particle.x, particle.y, simValueRef.current);
       }
 
       for (let i = 0; i < particles.length; i++) {
@@ -871,8 +976,7 @@ export default function CymaticVisualizer({
           0,
           1
         );
-        const hueShiftAmount = HUE_SHIFT_MAX * Math.pow(radialDistance, 0.7);
-        const pulseLegacyBlend = getPulseLegacyBlend(simValueRef.current);
+        const hueShiftAmount = hueShiftRef.current * Math.pow(radialDistance, 0.7);
         const shiftedColor = lerpColor(
           shiftHueTowardBrighterLuma(agentColor, hueShiftAmount),
           shiftHue(agentColor, hueShiftAmount),
@@ -918,7 +1022,9 @@ export default function CymaticVisualizer({
         ctx.fillRect(px - size * 0.5, py - size * 0.5, size, size);
       }
 
-      renderPost(performance.now());
+      if (renderMode === "full") {
+        renderPost(performance.now());
+      }
     };
 
     frameRef.current = requestAnimationFrame(loop);
@@ -926,6 +1032,10 @@ export default function CymaticVisualizer({
     return () => {
       cancelAnimationFrame(frameRef.current);
       observer.disconnect();
+
+      if (sourceCanvasRef) {
+        sourceCanvasRef.current = null;
+      }
 
       if (gl) {
         if (passAFramebuffer) gl.deleteFramebuffer(passAFramebuffer);
@@ -938,14 +1048,28 @@ export default function CymaticVisualizer({
         if (blurProgram) gl.deleteProgram(blurProgram);
         if (asciiProgram) gl.deleteProgram(asciiProgram);
         if (chromaticProgram) gl.deleteProgram(chromaticProgram);
+        if (glowProgram) gl.deleteProgram(glowProgram);
       }
     };
-  }, []);
+  }, [densityMultiplier, renderMode, sourceCanvasRef]);
 
   return (
-    <div className="root" style={{ opacity }}>
+    <div
+      className={`root ${className ?? ""} ${
+        renderMode === "source" ? "rootSource" : ""
+      }`}
+      style={renderMode === "source" ? { opacity, width: "100%" } : { opacity }}
+    >
       <div className="square" ref={squareRef}>
-        <canvas ref={simCanvasRef} className="simCanvas" />
+        <canvas
+          ref={(node) => {
+            simCanvasRef.current = node;
+            if (sourceCanvasRef) {
+              sourceCanvasRef.current = node;
+            }
+          }}
+          className="simCanvas"
+        />
         <canvas ref={glCanvasRef} className="canvas" />
       </div>
 
@@ -963,6 +1087,10 @@ export default function CymaticVisualizer({
           overflow: hidden;
         }
 
+        .rootSource {
+          width: 100%;
+        }
+
         .canvas {
           position: absolute;
           inset: 0;
@@ -976,7 +1104,7 @@ export default function CymaticVisualizer({
           inset: 0;
           width: 100%;
           height: 100%;
-          visibility: hidden;
+          visibility: ${renderMode === "source" ? "visible" : "hidden"};
           pointer-events: none;
         }
       `}</style>
