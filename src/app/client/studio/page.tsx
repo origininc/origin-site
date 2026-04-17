@@ -16,7 +16,7 @@ const getSearchParam = (value: string | string[] | undefined) =>
 
 const getErrorMessage = (code: string | undefined) => {
   if (code === "invalid") {
-    return "That passphrase did not match.";
+    return "Passphrase did not match.";
   }
 
   if (code === "config") {
