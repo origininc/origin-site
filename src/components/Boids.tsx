@@ -29,6 +29,10 @@ import {
   vignetteFrag,
   vignetteVert,
 } from "@/components/shaders/vignette";
+import {
+  DESKTOP_CANVAS_RUNTIME,
+  type CanvasRuntimeProfile,
+} from "@/lib/canvasRuntime";
 
 const copyVert = `
 precision mediump float;
@@ -363,6 +367,7 @@ type BoidsProps = {
   disperse?: number;
   interactionTargetRef?: MutableRefObject<HTMLElement | null>;
   renderMode?: "full" | "source";
+  runtimeProfile?: CanvasRuntimeProfile;
   sourceCanvasRef?: MutableRefObject<HTMLCanvasElement | null>;
   studioSettings?: BoidsStudioSettings;
 };
@@ -396,6 +401,7 @@ export default function Boids({
   disperse = 0,
   interactionTargetRef,
   renderMode = "full",
+  runtimeProfile = DESKTOP_CANVAS_RUNTIME,
   sourceCanvasRef,
   studioSettings,
 }: BoidsProps) {
@@ -411,6 +417,8 @@ export default function Boids({
   const presetRef = useRef<Preset>(createEffectivePreset(studioSettings));
   presetRef.current = createEffectivePreset(studioSettings);
 
+  const boidsRuntime = runtimeProfile.boids;
+
   const boidsRef = useRef<Boid[]>([]);
   const mouseRef = useRef<Vec2 | null>(null);
   const runningRef = useRef(true);
@@ -418,11 +426,11 @@ export default function Boids({
   const sizeRef = useRef({ w: 0, h: 0, dpr: 1 });
   const skeletonRef = useRef<Skeleton | null>(null);
 
-  const ENABLE_HORIZONTAL_BLUR = true;
-  const ENABLE_ASCII = true;
-  const ENABLE_CHROMATIC = true;
-  const ENABLE_RADIAL_GLOW = true;
-  const ENABLE_VIGNETTE = true;
+  const ENABLE_HORIZONTAL_BLUR = boidsRuntime.passes.blur;
+  const ENABLE_ASCII = boidsRuntime.passes.ascii;
+  const ENABLE_CHROMATIC = boidsRuntime.passes.chromatic;
+  const ENABLE_RADIAL_GLOW = boidsRuntime.passes.glow;
+  const ENABLE_VIGNETTE = boidsRuntime.passes.vignette;
 
   const rand = (min: number, max: number) => Math.random() * (max - min) + min;
 
@@ -931,7 +939,10 @@ export default function Boids({
 
   const resetBoids = () => {
     const { w, h } = sizeRef.current;
-    const total = COUNTS[countIndex];
+    const total = Math.max(
+      120,
+      Math.round(COUNTS[countIndex] * boidsRuntime.countMultiplier)
+    );
     const speciesList = normalizeSpecies(presetRef.current);
     const sk = skeletonRef.current;
 
@@ -1008,7 +1019,10 @@ export default function Boids({
     const simCanvas = simCanvasRef.current!;
     const glCanvas = glCanvasRef.current;
     const container = containerRef.current!;
-    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    const dpr = Math.max(
+      1,
+      Math.min(boidsRuntime.dprCap, window.devicePixelRatio || 1)
+    );
     const width = Math.max(1, container.clientWidth);
     const height = Math.max(1, container.clientHeight);
 
@@ -1840,7 +1854,10 @@ export default function Boids({
         return;
       }
 
-      gl = glCanvas.getContext("webgl", { premultipliedAlpha: false });
+      gl = glCanvas.getContext("webgl", {
+        premultipliedAlpha: false,
+        powerPreference: boidsRuntime.powerPreference,
+      });
       if (!gl) {
         throw new Error("WebGL not supported");
       }
@@ -1990,9 +2007,21 @@ export default function Boids({
 
     runningRef.current = true;
     let raf = 0;
+    let lastFrameTime = 0;
 
     const loop = (time: number) => {
       if (!runningRef.current) return;
+
+      if (
+        boidsRuntime.frameIntervalMs > 0 &&
+        lastFrameTime > 0 &&
+        time - lastFrameTime < boidsRuntime.frameIntervalMs
+      ) {
+        raf = requestAnimationFrame(loop);
+        return;
+      }
+
+      lastFrameTime = time;
 
       step();
       draw();
@@ -2036,12 +2065,12 @@ export default function Boids({
       if (vignetteProgram) gl.deleteProgram(vignetteProgram);
       if (copyProgram) gl.deleteProgram(copyProgram);
     };
-  }, [interactionTargetRef, renderMode, sourceCanvasRef]);
+  }, [boidsRuntime, interactionTargetRef, renderMode, sourceCanvasRef]);
 
   useEffect(() => {
     initSkeleton();
     resetBoids();
-  }, [countIndex]);
+  }, [boidsRuntime.countMultiplier, countIndex]);
 
   return (
     <div

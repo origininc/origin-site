@@ -19,12 +19,17 @@ import {
   radialGlowFrag,
   radialGlowVert,
 } from "@/components/shaders/radialGlow";
+import {
+  DESKTOP_CANVAS_RUNTIME,
+  type CanvasRuntimeProfile,
+} from "@/lib/canvasRuntime";
 
 type CymaticVisualizerProps = {
   className?: string;
   value: number;
   opacity?: number;
   renderMode?: "full" | "source";
+  runtimeProfile?: CanvasRuntimeProfile;
   sourceCanvasRef?: MutableRefObject<HTMLCanvasElement | null>;
   studioSettings?: CymaticsStudioSettings;
 };
@@ -101,8 +106,6 @@ const COLOR_BRIGHTNESS_BOOST = 1.01;
 const HUE_SHIFT_MAX = 0.32;
 const TARGET_AGENT_LUMA = 0.62;
 const MAX_LUMA_LIFT = 1.0;
-const ENABLE_RADIAL_GLOW = true;
-const GLOW_OVERSCAN = 0.12;
 const ASCII_PIXELATION = 0.82;
 
 const clamp = (value: number, min: number, max: number) =>
@@ -283,14 +286,19 @@ const sampleEnergyGradientForMode = (x: number, y: number, mode: ModePair) => {
   return { energy, gradientX, gradientY };
 };
 
-const projectTowardNode = (x: number, y: number, value: number) => {
+const projectTowardNode = (
+  x: number,
+  y: number,
+  value: number,
+  projectionSteps: number
+) => {
   const source = sampleEnergyGradient(x, y, value);
   let projectedX = x;
   let projectedY = y;
   let gradientX = source.gradientX;
   let gradientY = source.gradientY;
 
-  for (let step = 0; step < NODE_PROJECTION_STEPS; step++) {
+  for (let step = 0; step < projectionSteps; step++) {
     const sample = sampleEnergyGradient(projectedX, projectedY, value);
     gradientX = sample.gradientX;
     gradientY = sample.gradientY;
@@ -312,14 +320,19 @@ const projectTowardNode = (x: number, y: number, value: number) => {
   };
 };
 
-const projectTowardNodeForMode = (x: number, y: number, mode: ModePair) => {
+const projectTowardNodeForMode = (
+  x: number,
+  y: number,
+  mode: ModePair,
+  projectionSteps: number
+) => {
   const source = sampleEnergyGradientForMode(x, y, mode);
   let projectedX = x;
   let projectedY = y;
   let gradientX = source.gradientX;
   let gradientY = source.gradientY;
 
-  for (let step = 0; step < NODE_PROJECTION_STEPS; step++) {
+  for (let step = 0; step < projectionSteps; step++) {
     const sample = sampleEnergyGradientForMode(projectedX, projectedY, mode);
     gradientX = sample.gradientX;
     gradientY = sample.gradientY;
@@ -362,6 +375,7 @@ export default function CymaticVisualizer({
   value,
   opacity = 1,
   renderMode = "full",
+  runtimeProfile = DESKTOP_CANVAS_RUNTIME,
   sourceCanvasRef,
   studioSettings,
 }: CymaticVisualizerProps) {
@@ -382,12 +396,18 @@ export default function CymaticVisualizer({
   const targetValueRef = useRef(value);
   const simValueRef = useRef(value);
   const opacityRef = useRef(opacity);
+  const cymaticsRuntime = runtimeProfile.cymatics;
   const harmonicMRef = useRef(studioSettings?.harmonicM ?? MODES[0].m);
   const harmonicNRef = useRef(studioSettings?.harmonicN ?? MODES[0].n);
   const mainHueRef = useRef(studioSettings?.mainHue ?? 0);
   const nodePullRef = useRef(studioSettings?.nodePull ?? NODE_PULL_MIX);
   const hueShiftRef = useRef(studioSettings?.hueShift ?? HUE_SHIFT_MAX);
-  const densityMultiplier = studioSettings?.particleDensity ?? 1;
+  const ENABLE_HORIZONTAL_BLUR = cymaticsRuntime.passes.blur;
+  const ENABLE_ASCII = cymaticsRuntime.passes.ascii;
+  const ENABLE_CHROMATIC = cymaticsRuntime.passes.chromatic;
+  const ENABLE_RADIAL_GLOW = cymaticsRuntime.passes.glow;
+  const densityMultiplier =
+    (studioSettings?.particleDensity ?? 1) * cymaticsRuntime.densityMultiplier;
 
   targetValueRef.current = value;
   opacityRef.current = opacity;
@@ -411,6 +431,7 @@ export default function CymaticVisualizer({
         ? glCanvas.getContext("webgl", {
             alpha: true,
             premultipliedAlpha: false,
+            powerPreference: cymaticsRuntime.powerPreference,
           })
         : null;
 
@@ -668,37 +689,43 @@ export default function CymaticVisualizer({
         writeToA = !writeToA;
       };
 
-      renderPassToFbo(
-        localBlurProgram,
-        () => {
-          gl.uniform1i(localBlurUniforms.texture, 0);
-          gl.uniform2f(localBlurUniforms.resolution, renderW, renderH);
-          gl.uniform1f(localBlurUniforms.blurAmount, 6.0);
-        },
-        currentTexture
-      );
+      if (ENABLE_HORIZONTAL_BLUR) {
+        renderPassToFbo(
+          localBlurProgram,
+          () => {
+            gl.uniform1i(localBlurUniforms.texture, 0);
+            gl.uniform2f(localBlurUniforms.resolution, renderW, renderH);
+            gl.uniform1f(localBlurUniforms.blurAmount, 6.0);
+          },
+          currentTexture
+        );
+      }
 
-      renderPassToFbo(
-        localAsciiProgram,
-        () => {
-          gl.uniform1i(localAsciiUniforms.texture, 0);
-          gl.uniform2f(localAsciiUniforms.resolution, renderW, renderH);
-          gl.uniform2f(localAsciiUniforms.mouse, renderW * 0.5, renderH * 0.5);
-          gl.uniform1f(localAsciiUniforms.pixelation, ASCII_PIXELATION);
-        },
-        currentTexture
-      );
+      if (ENABLE_ASCII) {
+        renderPassToFbo(
+          localAsciiProgram,
+          () => {
+            gl.uniform1i(localAsciiUniforms.texture, 0);
+            gl.uniform2f(localAsciiUniforms.resolution, renderW, renderH);
+            gl.uniform2f(localAsciiUniforms.mouse, renderW * 0.5, renderH * 0.5);
+            gl.uniform1f(localAsciiUniforms.pixelation, ASCII_PIXELATION);
+          },
+          currentTexture
+        );
+      }
 
-      renderPassToFbo(
-        localChromaticProgram,
-        () => {
-          gl.uniform1i(localChromaticUniforms.texture, 0);
-          gl.uniform1f(localChromaticUniforms.time, timeMs * 0.001);
-          gl.uniform2f(localChromaticUniforms.resolution, renderW, renderH);
-          gl.uniform1f(localChromaticUniforms.strength, 0.003);
-        },
-        currentTexture
-      );
+      if (ENABLE_CHROMATIC) {
+        renderPassToFbo(
+          localChromaticProgram,
+          () => {
+            gl.uniform1i(localChromaticUniforms.texture, 0);
+            gl.uniform1f(localChromaticUniforms.time, timeMs * 0.001);
+            gl.uniform2f(localChromaticUniforms.resolution, renderW, renderH);
+            gl.uniform1f(localChromaticUniforms.strength, 0.003);
+          },
+          currentTexture
+        );
+      }
 
       if (ENABLE_RADIAL_GLOW) {
         renderPassToFbo(
@@ -812,11 +839,14 @@ export default function CymaticVisualizer({
     const resize = () => {
       const viewWidth = Math.max(1, square.clientWidth);
       const viewHeight = Math.max(1, square.clientHeight);
-      const padX = Math.round(viewWidth * GLOW_OVERSCAN);
-      const padY = Math.round(viewHeight * GLOW_OVERSCAN);
+      const padX = Math.round(viewWidth * cymaticsRuntime.glowOverscan);
+      const padY = Math.round(viewHeight * cymaticsRuntime.glowOverscan);
       const renderWidth = viewWidth + padX * 2;
       const renderHeight = viewHeight + padY * 2;
-      const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      const dpr = Math.max(
+        1,
+        Math.min(cymaticsRuntime.dprCap, window.devicePixelRatio || 1)
+      );
 
       simCanvas.width = Math.floor(renderWidth * dpr);
       simCanvas.height = Math.floor(renderHeight * dpr);
@@ -847,8 +877,8 @@ export default function CymaticVisualizer({
 
       const particleCount = clamp(
         Math.round(((viewWidth * viewHeight) / 150) * densityMultiplier),
-        500,
-        4400
+        cymaticsRuntime.particleMin,
+        cymaticsRuntime.particleMax
       );
       particlesRef.current = Array.from({ length: particleCount }, randomParticle);
     };
@@ -860,8 +890,21 @@ export default function CymaticVisualizer({
     });
     observer.observe(square);
 
+    let lastFrameTime = 0;
     const loop = () => {
       frameRef.current = requestAnimationFrame(loop);
+
+      const time = performance.now();
+
+      if (
+        cymaticsRuntime.frameIntervalMs > 0 &&
+        lastFrameTime > 0 &&
+        time - lastFrameTime < cymaticsRuntime.frameIntervalMs
+      ) {
+        return;
+      }
+
+      lastFrameTime = time;
 
       if (opacityRef.current <= 0.01) {
         return;
@@ -900,11 +943,17 @@ export default function CymaticVisualizer({
       for (let i = 0; i < particles.length; i++) {
         const particle = particles[i];
         const projection = customMode
-          ? projectTowardNodeForMode(particle.homeX, particle.homeY, customMode)
+          ? projectTowardNodeForMode(
+              particle.homeX,
+              particle.homeY,
+              customMode,
+              cymaticsRuntime.nodeProjectionSteps
+            )
           : projectTowardNode(
               particle.homeX,
               particle.homeY,
-              simValueRef.current
+              simValueRef.current,
+              cymaticsRuntime.nodeProjectionSteps
             );
         const desiredX = lerp(particle.homeX, projection.x, nodePullRef.current);
         const desiredY = lerp(particle.homeY, projection.y, nodePullRef.current);
@@ -1023,7 +1072,7 @@ export default function CymaticVisualizer({
       }
 
       if (renderMode === "full") {
-        renderPost(performance.now());
+        renderPost(time);
       }
     };
 
@@ -1051,7 +1100,7 @@ export default function CymaticVisualizer({
         if (glowProgram) gl.deleteProgram(glowProgram);
       }
     };
-  }, [densityMultiplier, renderMode, sourceCanvasRef]);
+  }, [cymaticsRuntime, densityMultiplier, renderMode, sourceCanvasRef]);
 
   return (
     <div

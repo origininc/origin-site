@@ -3,6 +3,7 @@
 import Boids from "@/components/Boids";
 import CymaticVisualizer from "@/components/CymaticVisualizer";
 import SmoothScroll from "@/components/SmoothScroll";
+import { useCanvasRuntimeProfile } from "@/hooks/useCanvasRuntimeProfile";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -140,6 +141,7 @@ const PLACEHOLDER_PAIRS = [
 ] as const;
 
 export default function Home() {
+  const canvasRuntimeProfile = useCanvasRuntimeProfile();
   const [aboutProgress, setAboutProgress] = useState(0);
   const [titleProgress, setTitleProgress] = useState(0);
   const [aboutFadeProgress, setAboutFadeProgress] = useState(0);
@@ -342,7 +344,10 @@ export default function Home() {
         }
       >
         <div className="boids-bg">
-          <Boids disperse={disperseAmount} />
+          <Boids
+            disperse={disperseAmount}
+            runtimeProfile={canvasRuntimeProfile}
+          />
           <div
             className="boids-fade"
             style={{ opacity: boidsOverlayOpacity }}
@@ -448,6 +453,7 @@ export default function Home() {
             <CymaticVisualizer
               value={visualizerValue}
               opacity={placeholderOverlayOpacity}
+              runtimeProfile={canvasRuntimeProfile}
             />
           </div>
         </div>
