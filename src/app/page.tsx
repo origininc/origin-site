@@ -5,12 +5,39 @@ import CymaticVisualizer from "@/components/CymaticVisualizer";
 import SmoothScroll from "@/components/SmoothScroll";
 import { useCanvasRuntimeProfile } from "@/hooks/useCanvasRuntimeProfile";
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 type PixelateLevel = {
   cell: number;
   dilate: number;
   tile: number;
+};
+
+type PlaceholderCardVisual = {
+  opacity: number;
+  pixelate: number;
+  translateY: number;
+};
+
+type ScrollVisualSnapshot = {
+  aboutOpacity: number;
+  aboutPixelate: number;
+  aboutTranslateY: number;
+  boidsOverlayOpacity: number;
+  disperseAmount: number;
+  hintOpacity: number;
+  placeholderCards: PlaceholderCardVisual[];
+  scrollProgress: number;
+  titleOpacity: number;
+  titlePixelate: number;
+  visualizerOpacity: number;
+  visualizerValue: number;
 };
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
@@ -121,6 +148,93 @@ const getPixelateOpacity = (progress: number) => {
   return 1 - PIXELATE_OPACITY_DROP * ramp;
 };
 
+const getScrollVisualSnapshot = (
+  scroll: number,
+  vh: number,
+  maxScroll: number,
+  placeholderProgress: number
+): ScrollVisualSnapshot => {
+  const aboutProgress = clamp01(
+    (scroll - vh * HERO_ABOUT_IN_START) / (vh * HERO_ABOUT_IN_END)
+  );
+  const titleProgress = clamp01(
+    (scroll - vh * HERO_TITLE_OUT_START) /
+      (vh * Math.max(0.001, HERO_ABOUT_IN_END - HERO_TITLE_RETURN_END))
+  );
+  const aboutFadeProgress = clamp01(
+    (scroll - vh * HERO_ABOUT_OUT_START_SCROLL) / (vh * HERO_ABOUT_OUT_DURATION)
+  );
+  const exitProgress = clamp01(
+    (scroll - vh * HERO_EXIT_START_SCROLL) / (vh * HERO_EXIT_DURATION)
+  );
+
+  const aboutIn = aboutProgress;
+  const aboutOut = 1 - aboutFadeProgress;
+  const aboutPixelate = Math.max(1 - aboutIn, aboutFadeProgress);
+  const aboutOpacity =
+    Math.min(aboutIn, aboutOut) * getPixelateOpacity(aboutPixelate);
+  const aboutTranslateY =
+    aboutIn < 1 ? 24 * (1 - aboutIn) : -14 * aboutFadeProgress;
+
+  const titlePixelate = titleProgress;
+  const titleOpacity =
+    (1 - titleProgress) * getPixelateOpacity(titlePixelate);
+
+  const hintOpacity = Math.max(0, 1 - aboutProgress * 3);
+  const placeholderTotalSpan =
+    (PLACEHOLDER_PAIRS.length - 1) * PLACEHOLDER_STEP + PLACEHOLDER_FADE_IN;
+  const placeholderTimeline =
+    -PLACEHOLDER_FADE_IN + placeholderProgress * placeholderTotalSpan;
+  const innatePhase = placeholderTimeline;
+  const boidsOverlayOpacity = clamp01(
+    (innatePhase + PLACEHOLDER_FADE_IN) / PLACEHOLDER_FADE_IN
+  );
+  const disperseAmount = exitProgress * (1 - boidsOverlayOpacity * 0.85);
+
+  const placeholderCards = PLACEHOLDER_PAIRS.map((_, index) => {
+    const phase = placeholderTimeline - index * PLACEHOLDER_STEP;
+    const visibility = getAgentCardVisibility(
+      phase,
+      index === PLACEHOLDER_PAIRS.length - 1
+    );
+    const pixelate = 1 - visibility;
+
+    return {
+      opacity: Math.pow(visibility, 1.15) * getPixelateOpacity(pixelate),
+      pixelate,
+      translateY:
+        phase < 0 ? 28 * (1 - visibility) : -18 * (1 - visibility),
+    };
+  });
+
+  const visualizerOpacity = PLACEHOLDER_PAIRS.reduce((maxVisibility, _, index) => {
+    const phase = placeholderTimeline - index * PLACEHOLDER_STEP;
+    const visibility = getAgentCardVisibility(
+      phase,
+      index === PLACEHOLDER_PAIRS.length - 1
+    );
+    return Math.max(maxVisibility, visibility);
+  }, 0);
+
+  return {
+    aboutOpacity,
+    aboutPixelate,
+    aboutTranslateY,
+    boidsOverlayOpacity,
+    disperseAmount,
+    hintOpacity,
+    placeholderCards,
+    scrollProgress: clamp01(scroll / maxScroll),
+    titleOpacity,
+    titlePixelate,
+    visualizerOpacity,
+    visualizerValue: getAgentDisplayValue(
+      placeholderTimeline,
+      PLACEHOLDER_PAIRS.length
+    ),
+  };
+};
+
 const PLACEHOLDER_PAIRS = [
   {
     title: "innate",
@@ -140,73 +254,144 @@ const PLACEHOLDER_PAIRS = [
   },
 ] as const;
 
+const INITIAL_SCROLL_VISUALS = getScrollVisualSnapshot(0, 1, 1, 0);
+
 export default function Home() {
   const canvasRuntimeProfile = useCanvasRuntimeProfile();
-  const [aboutProgress, setAboutProgress] = useState(0);
-  const [titleProgress, setTitleProgress] = useState(0);
-  const [aboutFadeProgress, setAboutFadeProgress] = useState(0);
-  const [exitProgress, setExitProgress] = useState(0);
-  const [placeholderProgress, setPlaceholderProgress] = useState(0);
-  const [scrollProgress, setScrollProgress] = useState(0);
-  const [showScrollProgress, setShowScrollProgress] = useState(false);
+  const mainRef = useRef<HTMLElement | null>(null);
+  const boidsFadeRef = useRef<HTMLDivElement | null>(null);
+  const heroIntroRef = useRef<HTMLDivElement | null>(null);
+  const aboutKickerRef = useRef<HTMLDivElement | null>(null);
+  const aboutBodyRef = useRef<HTMLDivElement | null>(null);
+  const scrollHintRef = useRef<HTMLDivElement | null>(null);
+  const placeholderVisualizerShellRef = useRef<HTMLDivElement | null>(null);
+  const placeholderCardRefs = useRef<Array<HTMLElement | null>>([]);
   const placeholderSectionRef = useRef<HTMLElement | null>(null);
+  const placeholderMetricsRef = useRef({
+    maxScroll: 1,
+    sectionTop: 0,
+    stickyTravel: 1,
+    vh: 1,
+  });
   const scrollOverlayTimeoutRef = useRef<number | null>(null);
+  const boidsDisperseRef = useRef(INITIAL_SCROLL_VISUALS.disperseAmount);
+  const visualizerValueRef = useRef(INITIAL_SCROLL_VISUALS.visualizerValue);
+  const visualizerOpacityRef = useRef(INITIAL_SCROLL_VISUALS.visualizerOpacity);
   const [siteInvert, setSiteInvert] = useState(false);
 
-  const handleScroll = useCallback((scroll: number, showIndicator = true) => {
-    const vh = window.innerHeight;
-    const doc = document.documentElement;
-    const maxScroll = Math.max(1, doc.scrollHeight - vh);
+  const applyScrollVisuals = useCallback((visuals: ScrollVisualSnapshot) => {
+    const main = mainRef.current;
+    if (main) {
+      main.style.setProperty("--scroll-progress", `${visuals.scrollProgress}`);
+    }
 
-    setScrollProgress(clamp01(scroll / maxScroll));
+    boidsDisperseRef.current = visuals.disperseAmount;
+    visualizerValueRef.current = visuals.visualizerValue;
+    visualizerOpacityRef.current = visuals.visualizerOpacity;
+
+    if (boidsFadeRef.current) {
+      boidsFadeRef.current.style.opacity = `${visuals.boidsOverlayOpacity}`;
+    }
+
+    if (heroIntroRef.current) {
+      heroIntroRef.current.style.opacity = `${visuals.titleOpacity}`;
+      heroIntroRef.current.style.filter = getPixelateFilter(visuals.titlePixelate);
+    }
+
+    if (aboutKickerRef.current) {
+      aboutKickerRef.current.style.opacity = `${visuals.aboutOpacity}`;
+      aboutKickerRef.current.style.filter = getPixelateFilter(
+        visuals.aboutPixelate
+      );
+      aboutKickerRef.current.style.transform = `translateY(${visuals.aboutTranslateY}px)`;
+    }
+
+    if (aboutBodyRef.current) {
+      aboutBodyRef.current.style.opacity = `${visuals.aboutOpacity}`;
+      aboutBodyRef.current.style.filter = getPixelateFilter(
+        visuals.aboutPixelate
+      );
+      aboutBodyRef.current.style.transform = `translateY(calc(-50% + ${visuals.aboutTranslateY}px))`;
+    }
+
+    if (scrollHintRef.current) {
+      scrollHintRef.current.style.opacity = `${visuals.hintOpacity}`;
+    }
+
+    if (placeholderVisualizerShellRef.current) {
+      placeholderVisualizerShellRef.current.style.opacity = `${visuals.visualizerOpacity}`;
+    }
+
+    visuals.placeholderCards.forEach((card, index) => {
+      const node = placeholderCardRefs.current[index];
+      if (!node) {
+        return;
+      }
+
+      node.style.opacity = `${card.opacity}`;
+      node.style.filter = getPixelateFilter(card.pixelate);
+      node.style.transform = `translateY(${card.translateY}px)`;
+    });
+  }, []);
+
+  const updatePlaceholderMetrics = useCallback(() => {
+    const vh = window.innerHeight;
+    const maxScroll = Math.max(1, document.documentElement.scrollHeight - vh);
+    const placeholderSection = placeholderSectionRef.current;
+
+    if (!placeholderSection) {
+      placeholderMetricsRef.current = {
+        maxScroll,
+        sectionTop: 0,
+        stickyTravel: 1,
+        vh,
+      };
+      return;
+    }
+
+    const rect = placeholderSection.getBoundingClientRect();
+    placeholderMetricsRef.current = {
+      maxScroll,
+      sectionTop: window.scrollY + rect.top,
+      stickyTravel: Math.max(1, placeholderSection.offsetHeight - vh),
+      vh,
+    };
+  }, []);
+
+  const setScrollOverlayVisible = useCallback((visible: boolean) => {
+    const main = mainRef.current;
+    if (!main) {
+      return;
+    }
+
+    main.style.setProperty("--scroll-overlay-opacity", visible ? "1" : "0");
+    main.style.setProperty(
+      "--scroll-overlay-translate",
+      visible ? "0px" : "12px"
+    );
+  }, []);
+
+  const handleScroll = useCallback((scroll: number, showIndicator = true) => {
+    const { maxScroll, sectionTop, stickyTravel, vh } = placeholderMetricsRef.current;
+    const placeholderProgress = clamp01((scroll - sectionTop) / stickyTravel);
+
+    applyScrollVisuals(
+      getScrollVisualSnapshot(scroll, vh, maxScroll, placeholderProgress)
+    );
+
     if (showIndicator) {
-      setShowScrollProgress(true);
+      setScrollOverlayVisible(true);
 
       if (scrollOverlayTimeoutRef.current !== null) {
         window.clearTimeout(scrollOverlayTimeoutRef.current);
       }
 
       scrollOverlayTimeoutRef.current = window.setTimeout(() => {
-        setShowScrollProgress(false);
+        setScrollOverlayVisible(false);
         scrollOverlayTimeoutRef.current = null;
       }, 160);
     }
-
-    const about = clamp01(
-      (scroll - vh * HERO_ABOUT_IN_START) / (vh * HERO_ABOUT_IN_END)
-    );
-    setAboutProgress(about);
-
-    const title = clamp01(
-      (scroll - vh * HERO_TITLE_OUT_START) /
-        (vh * Math.max(0.001, HERO_ABOUT_IN_END - HERO_TITLE_RETURN_END))
-    );
-    setTitleProgress(title);
-
-    const aboutFade = clamp01(
-      (scroll - vh * HERO_ABOUT_OUT_START_SCROLL) /
-        (vh * HERO_ABOUT_OUT_DURATION)
-    );
-    setAboutFadeProgress(aboutFade);
-
-    const exit = clamp01(
-      (scroll - vh * HERO_EXIT_START_SCROLL) /
-        (vh * HERO_EXIT_DURATION)
-    );
-    setExitProgress(exit);
-
-    const placeholderSection = placeholderSectionRef.current;
-    if (!placeholderSection) {
-      setPlaceholderProgress(0);
-      return;
-    }
-
-    const rect = placeholderSection.getBoundingClientRect();
-    const sectionTop = scroll + rect.top;
-    const stickyTravel = Math.max(1, placeholderSection.offsetHeight - vh);
-    const localProgress = clamp01((scroll - sectionTop) / stickyTravel);
-    setPlaceholderProgress(localProgress);
-  }, []);
+  }, [applyScrollVisuals, setScrollOverlayVisible]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -234,16 +419,30 @@ export default function Home() {
 
   useEffect(() => {
     const syncScrollState = () => {
+      updatePlaceholderMetrics();
       handleScroll(window.scrollY, false);
     };
 
     syncScrollState();
     window.addEventListener("resize", syncScrollState);
+    const placeholderSection = placeholderSectionRef.current;
+    const observer = placeholderSection
+      ? new ResizeObserver(syncScrollState)
+      : null;
+    if (placeholderSection && observer) {
+      observer.observe(placeholderSection);
+    }
 
     return () => {
       window.removeEventListener("resize", syncScrollState);
+      observer?.disconnect();
     };
-  }, [handleScroll]);
+  }, [handleScroll, updatePlaceholderMetrics]);
+
+  useLayoutEffect(() => {
+    updatePlaceholderMetrics();
+    handleScroll(window.scrollY, false);
+  });
 
   useEffect(() => {
     return () => {
@@ -252,45 +451,6 @@ export default function Home() {
       }
     };
   }, []);
-
-  const aboutIn = aboutProgress;
-  const aboutOut = 1 - aboutFadeProgress;
-  const aboutPixelate = Math.max(1 - aboutIn, aboutFadeProgress);
-  const aboutOpacity =
-    Math.min(aboutIn, aboutOut) * getPixelateOpacity(aboutPixelate);
-  const aboutTranslateY = aboutIn < 1
-    ? 24 * (1 - aboutIn)
-    : -14 * aboutFadeProgress;
-
-  const titlePixelate = titleProgress;
-  const titleOpacity = (1 - titleProgress) * getPixelateOpacity(titlePixelate);
-
-  const hintOpacity = Math.max(0, 1 - aboutProgress * 3);
-  const placeholderTotalSpan =
-    (PLACEHOLDER_PAIRS.length - 1) * PLACEHOLDER_STEP + PLACEHOLDER_FADE_IN;
-  const placeholderTimeline =
-    -PLACEHOLDER_FADE_IN +
-    placeholderProgress * placeholderTotalSpan;
-
-  const innatePhase = placeholderTimeline;
-  const boidsOverlayOpacity = clamp01(
-    (innatePhase + PLACEHOLDER_FADE_IN) / PLACEHOLDER_FADE_IN
-  );
-
-  const disperseAmount = exitProgress * (1 - boidsOverlayOpacity * 0.85);
-
-  const placeholderOverlayOpacity = PLACEHOLDER_PAIRS.reduce((maxVisibility, _, index) => {
-    const phase = placeholderTimeline - index * PLACEHOLDER_STEP;
-    const visibility = getAgentCardVisibility(
-      phase,
-      index === PLACEHOLDER_PAIRS.length - 1
-    );
-    return Math.max(maxVisibility, visibility);
-  }, 0);
-  const visualizerValue = getAgentDisplayValue(
-    placeholderTimeline,
-    PLACEHOLDER_PAIRS.length
-  );
 
   return (
     <>
@@ -332,11 +492,12 @@ export default function Home() {
       />
 
       <main
+        ref={mainRef}
         style={
           {
-            "--scroll-overlay-opacity": showScrollProgress ? "1" : "0",
-            "--scroll-overlay-translate": showScrollProgress ? "0px" : "12px",
-            "--scroll-progress": scrollProgress.toString(),
+            "--scroll-overlay-opacity": "0",
+            "--scroll-overlay-translate": "12px",
+            "--scroll-progress": "0",
             "--site-filter": siteInvert
               ? "invert(1) grayscale(1)"
               : "none",
@@ -345,12 +506,14 @@ export default function Home() {
       >
         <div className="boids-bg">
           <Boids
-            disperse={disperseAmount}
+            disperse={INITIAL_SCROLL_VISUALS.disperseAmount}
+            disperseValueRef={boidsDisperseRef}
             runtimeProfile={canvasRuntimeProfile}
           />
           <div
+            ref={boidsFadeRef}
             className="boids-fade"
-            style={{ opacity: boidsOverlayOpacity }}
+            style={{ opacity: INITIAL_SCROLL_VISUALS.boidsOverlayOpacity }}
           />
         </div>
 
@@ -360,10 +523,11 @@ export default function Home() {
 
         <div className="fixed-overlay">
           <div
+            ref={heroIntroRef}
             className="hero-intro"
             style={{
-              opacity: titleOpacity,
-              filter: getPixelateFilter(titlePixelate),
+              opacity: INITIAL_SCROLL_VISUALS.titleOpacity,
+              filter: getPixelateFilter(INITIAL_SCROLL_VISUALS.titlePixelate),
             }}
           >
             <span className="hero-intro-word">origin</span>
@@ -371,22 +535,24 @@ export default function Home() {
           </div>
 
           <div
+            ref={aboutKickerRef}
             className="about-kicker about-left"
             style={{
-              filter: getPixelateFilter(aboutPixelate),
-              opacity: aboutOpacity,
-              transform: `translateY(${aboutTranslateY}px)`,
+              filter: getPixelateFilter(INITIAL_SCROLL_VISUALS.aboutPixelate),
+              opacity: INITIAL_SCROLL_VISUALS.aboutOpacity,
+              transform: `translateY(${INITIAL_SCROLL_VISUALS.aboutTranslateY}px)`,
             }}
           >
             about
           </div>
 
           <div
+            ref={aboutBodyRef}
             className="about-body"
             style={{
-              filter: getPixelateFilter(aboutPixelate),
-              opacity: aboutOpacity,
-              transform: `translateY(calc(-50% + ${aboutTranslateY}px))`,
+              filter: getPixelateFilter(INITIAL_SCROLL_VISUALS.aboutPixelate),
+              opacity: INITIAL_SCROLL_VISUALS.aboutOpacity,
+              transform: `translateY(calc(-50% + ${INITIAL_SCROLL_VISUALS.aboutTranslateY}px))`,
             }}
           >
             <p>
@@ -397,8 +563,9 @@ export default function Home() {
           </div>
 
           <div
+            ref={scrollHintRef}
             className="scroll-hint"
-            style={{ opacity: hintOpacity }}
+            style={{ opacity: INITIAL_SCROLL_VISUALS.hintOpacity }}
           >
             <svg
               width="20"
@@ -415,45 +582,42 @@ export default function Home() {
 
         <div className="placeholder-overlay">
           <div className="placeholder-copy">
-            {PLACEHOLDER_PAIRS.map((pair, index) => {
-              const phase = placeholderTimeline - index * PLACEHOLDER_STEP;
-              const visibility = getAgentCardVisibility(
-                phase,
-                index === PLACEHOLDER_PAIRS.length - 1
-              );
-              const pixelate = 1 - visibility;
-              const opacity =
-                Math.pow(visibility, 1.15) * getPixelateOpacity(pixelate);
-              const translateY = phase < 0
-                ? 28 * (1 - visibility)
-                : -18 * (1 - visibility);
-
-              return (
-                <article
-                  key={pair.title}
-                  className="placeholder-card"
-                  style={{
-                    opacity,
-                    filter: getPixelateFilter(pixelate),
-                    transform: `translateY(${translateY}px)`,
-                  }}
-                >
-                  <h2 className="placeholder-title">{pair.title}</h2>
-                  <div className="placeholder-body">
-                    {pair.body.split("\n").map((line) => (
-                      <p key={`${pair.title}-${line}`}>{line}</p>
-                    ))}
-                  </div>
-                </article>
-              );
-            })}
+            {PLACEHOLDER_PAIRS.map((pair, index) => (
+              <article
+                key={pair.title}
+                ref={(node) => {
+                  placeholderCardRefs.current[index] = node;
+                }}
+                className="placeholder-card"
+                style={{
+                  opacity: INITIAL_SCROLL_VISUALS.placeholderCards[index].opacity,
+                  filter: getPixelateFilter(
+                    INITIAL_SCROLL_VISUALS.placeholderCards[index].pixelate
+                  ),
+                  transform: `translateY(${INITIAL_SCROLL_VISUALS.placeholderCards[index].translateY}px)`,
+                }}
+              >
+                <h2 className="placeholder-title">{pair.title}</h2>
+                <div className="placeholder-body">
+                  {pair.body.split("\n").map((line) => (
+                    <p key={`${pair.title}-${line}`}>{line}</p>
+                  ))}
+                </div>
+              </article>
+            ))}
           </div>
 
-          <div className="placeholder-visualizer">
+          <div
+            ref={placeholderVisualizerShellRef}
+            className="placeholder-visualizer"
+            style={{ opacity: INITIAL_SCROLL_VISUALS.visualizerOpacity }}
+          >
             <CymaticVisualizer
-              value={visualizerValue}
-              opacity={placeholderOverlayOpacity}
+              value={INITIAL_SCROLL_VISUALS.visualizerValue}
+              opacity={1}
+              opacityRefExternal={visualizerOpacityRef}
               runtimeProfile={canvasRuntimeProfile}
+              valueRefExternal={visualizerValueRef}
             />
           </div>
         </div>

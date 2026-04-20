@@ -365,6 +365,7 @@ const COUNTS = BOIDS_STUDIO_DENSITY_COUNTS;
 type BoidsProps = {
   className?: string;
   disperse?: number;
+  disperseValueRef?: MutableRefObject<number>;
   interactionTargetRef?: MutableRefObject<HTMLElement | null>;
   renderMode?: "full" | "source";
   runtimeProfile?: CanvasRuntimeProfile;
@@ -399,6 +400,7 @@ const createEffectivePreset = (studioSettings?: BoidsStudioSettings): Preset => 
 export default function Boids({
   className,
   disperse = 0,
+  disperseValueRef,
   interactionTargetRef,
   renderMode = "full",
   runtimeProfile = DESKTOP_CANVAS_RUNTIME,
@@ -411,8 +413,9 @@ export default function Boids({
   const countIndex = studioSettings?.densityIndex ?? 1;
 
   const mouseModeRef = useRef<MouseMode>("off");
-  const disperseRef = useRef(0);
-  disperseRef.current = disperse;
+  const internalDisperseRef = useRef(disperse);
+  internalDisperseRef.current = disperse;
+  const effectiveDisperseRef = disperseValueRef ?? internalDisperseRef;
 
   const presetRef = useRef<Preset>(createEffectivePreset(studioSettings));
   presetRef.current = createEffectivePreset(studioSettings);
@@ -1047,7 +1050,7 @@ export default function Boids({
     const { w, h } = sizeRef.current;
     const base = presetRef.current;
     const boids = boidsRef.current;
-    const disperseT = clamp(disperseRef.current, 0, 1);
+    const disperseT = clamp(effectiveDisperseRef.current, 0, 1);
     const flockHold = lerp(1, 0.25, disperseT);
     const structureHold = lerp(1, 0.1, disperseT);
     const homeHold = lerp(1, 1.8, disperseT);

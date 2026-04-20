@@ -26,7 +26,9 @@ import {
 
 type CymaticVisualizerProps = {
   className?: string;
+  opacityRefExternal?: MutableRefObject<number>;
   value: number;
+  valueRefExternal?: MutableRefObject<number>;
   opacity?: number;
   renderMode?: "full" | "source";
   runtimeProfile?: CanvasRuntimeProfile;
@@ -372,7 +374,9 @@ const randomParticle = (): Particle => {
 
 export default function CymaticVisualizer({
   className,
+  opacityRefExternal,
   value,
+  valueRefExternal,
   opacity = 1,
   renderMode = "full",
   runtimeProfile = DESKTOP_CANVAS_RUNTIME,
@@ -393,9 +397,11 @@ export default function CymaticVisualizer({
     viewH: 0,
     viewW: 0,
   });
-  const targetValueRef = useRef(value);
-  const simValueRef = useRef(value);
-  const opacityRef = useRef(opacity);
+  const internalTargetValueRef = useRef(value);
+  const targetValueRef = valueRefExternal ?? internalTargetValueRef;
+  const simValueRef = useRef(valueRefExternal?.current ?? value);
+  const internalOpacityRef = useRef(opacity);
+  const opacityRef = opacityRefExternal ?? internalOpacityRef;
   const cymaticsRuntime = runtimeProfile.cymatics;
   const harmonicMRef = useRef(studioSettings?.harmonicM ?? MODES[0].m);
   const harmonicNRef = useRef(studioSettings?.harmonicN ?? MODES[0].n);
@@ -409,8 +415,8 @@ export default function CymaticVisualizer({
   const densityMultiplier =
     (studioSettings?.particleDensity ?? 1) * cymaticsRuntime.densityMultiplier;
 
-  targetValueRef.current = value;
-  opacityRef.current = opacity;
+  internalTargetValueRef.current = value;
+  internalOpacityRef.current = opacity;
   harmonicMRef.current = studioSettings?.harmonicM ?? MODES[0].m;
   harmonicNRef.current = studioSettings?.harmonicN ?? MODES[0].n;
   mainHueRef.current = studioSettings?.mainHue ?? 0;
@@ -895,18 +901,23 @@ export default function CymaticVisualizer({
       frameRef.current = requestAnimationFrame(loop);
 
       const time = performance.now();
+      const effectiveFrameIntervalMs =
+        opacityRef.current <= 0.02 ||
+        (typeof document !== "undefined" && document.hidden)
+          ? Math.max(cymaticsRuntime.frameIntervalMs, 120)
+          : cymaticsRuntime.frameIntervalMs;
 
       if (
-        cymaticsRuntime.frameIntervalMs > 0 &&
+        effectiveFrameIntervalMs > 0 &&
         lastFrameTime > 0 &&
-        time - lastFrameTime < cymaticsRuntime.frameIntervalMs
+        time - lastFrameTime < effectiveFrameIntervalMs
       ) {
         return;
       }
 
       lastFrameTime = time;
 
-      if (opacityRef.current <= 0.01) {
+      if (opacityRef.current <= 0.02) {
         return;
       }
 
