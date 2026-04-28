@@ -7,9 +7,9 @@ import {
   asciiPostVert,
 } from "@/components/shaders/asciiPost";
 import {
-  horizontalBlurFrag,
-  horizontalBlurVert,
-} from "@/components/shaders/horizontalBlur";
+  gaussianBlurFrag,
+  gaussianBlurVert,
+} from "@/components/shaders/gaussianBlur";
 import {
   temporalChromaticAberrationFrag,
   temporalChromaticAberrationVert,
@@ -119,6 +119,9 @@ const COLOR_MAX_STRENGTH = 1.0;
 const COLOR_MIN_STRENGTH = 0.9;
 const COLOR_BRIGHTNESS_BOOST = 1.01;
 const COLOR_SATURATION_BOOST = 1.85;
+const COLOR_TARGET_LIGHTNESS = 0.55;
+const COLOR_NEUTRAL_SATURATION_START = 0.03;
+const COLOR_NEUTRAL_SATURATION_END = 0.18;
 const HUE_SHIFT_MAX = 0.32;
 const TARGET_AGENT_LUMA = 0.62;
 const MAX_LUMA_LIFT = 1.0;
@@ -137,6 +140,15 @@ const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+const smoothstep = (edge0: number, edge1: number, value: number) => {
+  const t = clamp(
+    (value - edge0) / Math.max(1e-6, edge1 - edge0),
+    0,
+    1
+  );
+  return t * t * (3 - 2 * t);
+};
 
 const lerpColor = (a: Rgb, b: Rgb, t: number): Rgb => ({
   r: lerp(a.r, b.r, t),
@@ -225,6 +237,17 @@ const boostSaturation = (color: Rgb, amount: number): Rgb => {
     g: clamp(luma + (color.g - luma) * amount, 0, 1),
     b: clamp(luma + (color.b - luma) * amount, 0, 1),
   };
+};
+
+const normalizeColorLightness = (color: Rgb): Rgb => {
+  const hsl = rgbToHsl(color);
+  const chromaMix = smoothstep(
+    COLOR_NEUTRAL_SATURATION_START,
+    COLOR_NEUTRAL_SATURATION_END,
+    hsl.s
+  );
+  const targetLightness = lerp(hsl.l, COLOR_TARGET_LIGHTNESS, chromaMix);
+  return hslToRgb(hsl.h, hsl.s, targetLightness);
 };
 
 const getBlend = (value: number) => {
@@ -452,6 +475,7 @@ export default function CymaticVisualizer({
   const baseBlueRef = useRef(studioSettings?.baseBlue ?? 255);
   const nodePullRef = useRef(studioSettings?.nodePull ?? NODE_PULL_MIX);
   const hueShiftRef = useRef(studioSettings?.hueShift ?? HUE_SHIFT_MAX);
+  const particleSizeRef = useRef(studioSettings?.particleSize ?? 1);
   const ENABLE_HORIZONTAL_BLUR = cymaticsRuntime.passes.blur;
   const ENABLE_ASCII = cymaticsRuntime.passes.ascii;
   const ENABLE_CHROMATIC = cymaticsRuntime.passes.chromatic;
@@ -469,6 +493,7 @@ export default function CymaticVisualizer({
   baseBlueRef.current = studioSettings?.baseBlue ?? 255;
   nodePullRef.current = studioSettings?.nodePull ?? NODE_PULL_MIX;
   hueShiftRef.current = studioSettings?.hueShift ?? HUE_SHIFT_MAX;
+  particleSizeRef.current = studioSettings?.particleSize ?? 1;
 
   useEffect(() => {
     const square = squareRef.current;
@@ -559,6 +584,7 @@ export default function CymaticVisualizer({
     let blurUniforms:
       | {
           blurAmount: WebGLUniformLocation | null;
+          direction: WebGLUniformLocation | null;
           resolution: WebGLUniformLocation | null;
           texture: WebGLUniformLocation | null;
         }
@@ -755,18 +781,6 @@ export default function CymaticVisualizer({
         writeToA = !writeToA;
       };
 
-      if (ENABLE_HORIZONTAL_BLUR) {
-        renderPassToFbo(
-          localBlurProgram,
-          () => {
-            gl.uniform1i(localBlurUniforms.texture, 0);
-            gl.uniform2f(localBlurUniforms.resolution, renderW, renderH);
-            gl.uniform1f(localBlurUniforms.blurAmount, 6.0);
-          },
-          currentTexture
-        );
-      }
-
       if (ENABLE_ASCII) {
         renderPassToFbo(
           localAsciiProgram,
@@ -815,6 +829,30 @@ export default function CymaticVisualizer({
         );
       }
 
+      if (ENABLE_HORIZONTAL_BLUR) {
+        renderPassToFbo(
+          localBlurProgram,
+          () => {
+            gl.uniform1i(localBlurUniforms.texture, 0);
+            gl.uniform2f(localBlurUniforms.resolution, renderW, renderH);
+            gl.uniform2f(localBlurUniforms.direction, 1, 0);
+            gl.uniform1f(localBlurUniforms.blurAmount, 6.0);
+          },
+          currentTexture
+        );
+
+        renderPassToFbo(
+          localBlurProgram,
+          () => {
+            gl.uniform1i(localBlurUniforms.texture, 0);
+            gl.uniform2f(localBlurUniforms.resolution, renderW, renderH);
+            gl.uniform2f(localBlurUniforms.direction, 0, 1);
+            gl.uniform1f(localBlurUniforms.blurAmount, 6.0);
+          },
+          currentTexture
+        );
+      }
+
       if (ENABLE_VIGNETTE) {
         renderPassToFbo(
           localVignetteProgram,
@@ -846,7 +884,7 @@ export default function CymaticVisualizer({
     if (gl) {
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
       copyProgram = createProgram(gl, copyVert, copyFrag);
-      blurProgram = createProgram(gl, horizontalBlurVert, horizontalBlurFrag);
+      blurProgram = createProgram(gl, gaussianBlurVert, gaussianBlurFrag);
       asciiProgram = createProgram(gl, asciiPostVert, asciiPostFrag);
       chromaticProgram = createProgram(
         gl,
@@ -900,6 +938,7 @@ export default function CymaticVisualizer({
       blurUniforms = {
         texture: gl.getUniformLocation(blurProgram, "uTexture"),
         resolution: gl.getUniformLocation(blurProgram, "uResolution"),
+        direction: gl.getUniformLocation(blurProgram, "uDirection"),
         blurAmount: gl.getUniformLocation(blurProgram, "uBlurAmount"),
       };
       asciiUniforms = {
@@ -1137,7 +1176,7 @@ export default function CymaticVisualizer({
         const nodeBand = Math.pow(particle.energy, 0.65);
         const nodeCloseness = 1 - clamp(nodeBand / NODE_CLOSENESS_RANGE, 0, 1);
         const alpha = lerp(0.16, 0.98, nodeCloseness * nodeCloseness);
-        const size = lerp(1.15, 2.85, nodeCloseness);
+        const size = lerp(1.15, 2.85, nodeCloseness) * particleSizeRef.current;
         const radialDistance = clamp(
           Math.hypot(particle.x, particle.y) / Math.SQRT2,
           0,
@@ -1147,10 +1186,9 @@ export default function CymaticVisualizer({
         // Shift hue directly — no "toward brighter" steering that distorts the dial
         const shiftedColor = shiftHue(agentColor, hueShiftAmount);
 
-        // Normalize hue into a stable lightness band, then push chroma back up
-        // so reds/blues do not drift pastel against the darker background.
-        const hsl = rgbToHsl(shiftedColor);
-        const normalizedColor = hslToRgb(hsl.h, hsl.s, 0.55);
+        // Normalize colorful hues into a stable lightness band, but preserve
+        // the native brightness of near-neutral colors so white stays white.
+        const normalizedColor = normalizeColorLightness(shiftedColor);
         const saturatedColor = boostSaturation(
           normalizedColor,
           COLOR_SATURATION_BOOST

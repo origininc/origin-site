@@ -3,9 +3,9 @@ import {
   asciiPostVert,
 } from "@/components/shaders/asciiPost";
 import {
-  horizontalBlurFrag,
-  horizontalBlurVert,
-} from "@/components/shaders/horizontalBlur";
+  gaussianBlurFrag,
+  gaussianBlurVert,
+} from "@/components/shaders/gaussianBlur";
 import {
   radialGlowFrag,
   radialGlowVert,
@@ -49,6 +49,7 @@ type CopyUniforms = {
 
 type BlurUniforms = {
   blurAmount: WebGLUniformLocation | null;
+  direction: WebGLUniformLocation | null;
   resolution: WebGLUniformLocation | null;
   texture: WebGLUniformLocation | null;
 };
@@ -245,7 +246,7 @@ export class StudioPostFxRenderer {
     this.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
 
     this.copyProgram = createProgram(gl, copyVert, copyFrag);
-    this.blurProgram = createProgram(gl, horizontalBlurVert, horizontalBlurFrag);
+    this.blurProgram = createProgram(gl, gaussianBlurVert, gaussianBlurFrag);
     this.asciiProgram = createProgram(gl, asciiPostVert, asciiPostFrag);
     this.chromaticProgram = createProgram(
       gl,
@@ -287,6 +288,7 @@ export class StudioPostFxRenderer {
     this.blurUniforms = {
       texture: gl.getUniformLocation(this.blurProgram, "uTexture"),
       resolution: gl.getUniformLocation(this.blurProgram, "uResolution"),
+      direction: gl.getUniformLocation(this.blurProgram, "uDirection"),
       blurAmount: gl.getUniformLocation(this.blurProgram, "uBlurAmount"),
     };
     this.asciiUniforms = {
@@ -393,21 +395,6 @@ export class StudioPostFxRenderer {
       writeToA = !writeToA;
     };
 
-    if (settings.blur.enabled) {
-      renderPassToFbo(
-        this.blurProgram,
-        (localWidth, localHeight) => {
-          gl.uniform1i(this.blurUniforms.texture, 0);
-          gl.uniform2f(this.blurUniforms.resolution, localWidth, localHeight);
-          gl.uniform1f(
-            this.blurUniforms.blurAmount,
-            settings.blur.uniforms.blurAmount
-          );
-        },
-        currentTexture
-      );
-    }
-
     if (settings.ascii.enabled) {
       renderPassToFbo(
         this.asciiProgram,
@@ -473,6 +460,36 @@ export class StudioPostFxRenderer {
           gl.uniform1f(
             this.glowUniforms.radialFalloff,
             settings.glow.uniforms.radialFalloff
+          );
+        },
+        currentTexture
+      );
+    }
+
+    if (settings.blur.enabled) {
+      renderPassToFbo(
+        this.blurProgram,
+        (localWidth, localHeight) => {
+          gl.uniform1i(this.blurUniforms.texture, 0);
+          gl.uniform2f(this.blurUniforms.resolution, localWidth, localHeight);
+          gl.uniform2f(this.blurUniforms.direction, 1, 0);
+          gl.uniform1f(
+            this.blurUniforms.blurAmount,
+            settings.blur.uniforms.blurAmount
+          );
+        },
+        currentTexture
+      );
+
+      renderPassToFbo(
+        this.blurProgram,
+        (localWidth, localHeight) => {
+          gl.uniform1i(this.blurUniforms.texture, 0);
+          gl.uniform2f(this.blurUniforms.resolution, localWidth, localHeight);
+          gl.uniform2f(this.blurUniforms.direction, 0, 1);
+          gl.uniform1f(
+            this.blurUniforms.blurAmount,
+            settings.blur.uniforms.blurAmount
           );
         },
         currentTexture

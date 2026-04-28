@@ -19,6 +19,7 @@ export type CymaticsStudioSettings = {
   hueShift: number;
   nodePull: number;
   particleDensity: number;
+  particleSize: number;
 };
 
 export const BOIDS_STUDIO_DENSITY_COUNTS = [
@@ -60,4 +61,5 @@ export const createDefaultCymaticsStudioSettings =
     hueShift: 0.17,
     nodePull: 1,
     particleDensity: 2.3,
+    particleSize: 1,
   });

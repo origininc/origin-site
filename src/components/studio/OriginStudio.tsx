@@ -1206,6 +1206,10 @@ export default function OriginStudio() {
         value: `${cymaticsSettings.particleDensity.toFixed(2)}x`,
       },
       {
+        label: "Particle Size",
+        value: `${cymaticsSettings.particleSize.toFixed(2)}x`,
+      },
+      {
         label: "Export",
         value: `${CYMATICS_EXPORT_SIZE}×${CYMATICS_EXPORT_SIZE}`,
       },
@@ -1218,6 +1222,7 @@ export default function OriginStudio() {
     cymaticsSettings.harmonicM,
     cymaticsSettings.harmonicN,
     cymaticsSettings.particleDensity,
+    cymaticsSettings.particleSize,
     imageAsset,
     mode,
     previewSurfaceSize.height,
@@ -1574,6 +1579,14 @@ export default function OriginStudio() {
                 onChange={(value) => updateCymaticsSetting("particleDensity", value)}
               />
               <SliderField
+                label="Particle Size"
+                min={0.4}
+                max={3}
+                step={0.05}
+                value={cymaticsSettings.particleSize}
+                onChange={(value) => updateCymaticsSetting("particleSize", value)}
+              />
+              <SliderField
                 label="Node Pull"
                 min={0}
                 max={1}
@@ -1591,32 +1604,6 @@ export default function OriginStudio() {
               />
             </section>
           ) : null}
-
-          <section className="card passCard">
-            <div className="passHeader">
-              <div>
-                <p className="sectionEyebrow">Horizontal Blur</p>
-              </div>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={activeFxSettings.blur.enabled}
-                  onChange={(event) =>
-                    updatePassEnabled("blur", event.target.checked)
-                  }
-                />
-                <span>Enabled</span>
-              </label>
-            </div>
-            <SliderField
-              label="Blur Amount"
-              min={0}
-              max={16}
-              step={0.1}
-              value={activeFxSettings.blur.uniforms.blurAmount}
-              onChange={(value) => updatePassUniform("blur", "blurAmount", value)}
-            />
-          </section>
 
           <section className="card passCard">
             <div className="passHeader">
@@ -1733,6 +1720,32 @@ export default function OriginStudio() {
               step={0.05}
               value={activeFxSettings.glow.uniforms.radialFalloff}
               onChange={(value) => updatePassUniform("glow", "radialFalloff", value)}
+            />
+          </section>
+
+          <section className="card passCard">
+            <div className="passHeader">
+              <div>
+                <p className="sectionEyebrow">Gaussian Blur</p>
+              </div>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={activeFxSettings.blur.enabled}
+                  onChange={(event) =>
+                    updatePassEnabled("blur", event.target.checked)
+                  }
+                />
+                <span>Enabled</span>
+              </label>
+            </div>
+            <SliderField
+              label="Blur Amount"
+              min={0}
+              max={16}
+              step={0.1}
+              value={activeFxSettings.blur.uniforms.blurAmount}
+              onChange={(value) => updatePassUniform("blur", "blurAmount", value)}
             />
           </section>
 

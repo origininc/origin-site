@@ -16,9 +16,9 @@ import {
 } from "@/components/shaders/asciiPost";
 
 import {
-  horizontalBlurFrag,
-  horizontalBlurVert,
-} from "@/components/shaders/horizontalBlur";
+  gaussianBlurFrag,
+  gaussianBlurVert,
+} from "@/components/shaders/gaussianBlur";
 
 import {
   radialGlowFrag,
@@ -2020,6 +2020,7 @@ export default function Boids({
       | {
           texture: WebGLUniformLocation | null;
           resolution: WebGLUniformLocation | null;
+          direction: WebGLUniformLocation | null;
           blurAmount: WebGLUniformLocation | null;
         }
       | null = null;
@@ -2188,18 +2189,6 @@ export default function Boids({
         writeToA = !writeToA;
       };
 
-      if (ENABLE_HORIZONTAL_BLUR) {
-        renderPassToFbo(
-          blurProgram,
-          () => {
-            gl!.uniform1i(blurUniforms!.texture, 0);
-            gl!.uniform2f(blurUniforms!.resolution, w, h);
-            gl!.uniform1f(blurUniforms!.blurAmount, CREATURE_BLUR_AMOUNT);
-          },
-          currentTexture
-        );
-      }
-
       if (ENABLE_ASCII) {
         renderPassToFbo(
           asciiProgram,
@@ -2259,6 +2248,30 @@ export default function Boids({
         );
       }
 
+      if (ENABLE_HORIZONTAL_BLUR) {
+        renderPassToFbo(
+          blurProgram,
+          () => {
+            gl!.uniform1i(blurUniforms!.texture, 0);
+            gl!.uniform2f(blurUniforms!.resolution, w, h);
+            gl!.uniform2f(blurUniforms!.direction, 1, 0);
+            gl!.uniform1f(blurUniforms!.blurAmount, CREATURE_BLUR_AMOUNT);
+          },
+          currentTexture
+        );
+
+        renderPassToFbo(
+          blurProgram,
+          () => {
+            gl!.uniform1i(blurUniforms!.texture, 0);
+            gl!.uniform2f(blurUniforms!.resolution, w, h);
+            gl!.uniform2f(blurUniforms!.direction, 0, 1);
+            gl!.uniform1f(blurUniforms!.blurAmount, CREATURE_BLUR_AMOUNT);
+          },
+          currentTexture
+        );
+      }
+
       if (ENABLE_VIGNETTE) {
         renderPassToFbo(
           vignetteProgram,
@@ -2311,7 +2324,7 @@ export default function Boids({
         temporalChromaticAberrationFrag
       );
       asciiProgram = createProgram(gl, asciiPostVert, asciiPostFrag);
-      blurProgram = createProgram(gl, horizontalBlurVert, horizontalBlurFrag);
+      blurProgram = createProgram(gl, gaussianBlurVert, gaussianBlurFrag);
       glowProgram = createProgram(gl, radialGlowVert, radialGlowFrag);
       vignetteProgram = createProgram(gl, vignetteVert, vignetteFrag);
 
@@ -2374,6 +2387,7 @@ export default function Boids({
       blurUniforms = {
         texture: gl.getUniformLocation(blurProgram, "uTexture"),
         resolution: gl.getUniformLocation(blurProgram, "uResolution"),
+        direction: gl.getUniformLocation(blurProgram, "uDirection"),
         blurAmount: gl.getUniformLocation(blurProgram, "uBlurAmount"),
       };
       glowUniforms = {
