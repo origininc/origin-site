@@ -21,6 +21,7 @@ uniform sampler2D uTexture;
 uniform vec2 uResolution;
 uniform vec2 uMouse;
 uniform float uPixelation;
+uniform float uSaturation;
 
 varying vec2 vUv;
 
@@ -48,8 +49,10 @@ void main() {
 
   vec3 col = texture2D(uTexture, cursorPosition).rgb;
 
-  float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
-  float gray = smoothstep(0.0, 1.0, luma);
+  // Use peak channel intensity for glyph density so saturated hues
+  // (especially red/blue) are not treated as artificially "dark".
+  float brightness = max(max(col.r, col.g), col.b);
+  float gray = smoothstep(0.0, 1.0, brightness);
 
   float grayIndex = floor(clamp(gray, 0.0, 0.9999) * 16.0);
   float n = 0.0;
@@ -75,10 +78,15 @@ void main() {
 
   col = pow(col, vec3(0.55));
   col = col * character(n, p);
+  float colLuma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  vec3 grayCol = vec3(colLuma);
+  col = clamp(grayCol + (col - grayCol) * uSaturation, 0.0, 1.0);
 
   float mixAmt = 1.0;
   col = mix(vec3(character(n, p)), col, mixAmt);
 
-  gl_FragColor = vec4(col, 1.0);
+  // Alpha: brightness of final output — dark/empty cells are transparent
+  float alpha = max(max(col.r, col.g), col.b);
+  gl_FragColor = vec4(col, alpha);
 }
 `;

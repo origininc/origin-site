@@ -63,12 +63,13 @@ void main() {
 
 const CREATURE_BLUR_AMOUNT = 6.0;
 const CREATURE_ASCII_PIXELATION = 0.7;
+const CREATURE_ASCII_SATURATION = 1.0;
 const CREATURE_CHROMATIC_STRENGTH = 0.003;
-const CREATURE_GLOW_STRENGTH = 2.0;
+const CREATURE_GLOW_STRENGTH = 3.5;
 const CREATURE_GLOW_RADIUS = 6.0;
-const CREATURE_GLOW_RADIAL_STRENGTH = 2.0;
+const CREATURE_GLOW_RADIAL_STRENGTH = 3.0;
 const CREATURE_GLOW_RADIAL_FALLOFF = 1.65;
-const CREATURE_VIGNETTE_STRENGTH = 1.0;
+const CREATURE_VIGNETTE_STRENGTH = 0.5;
 const CREATURE_VIGNETTE_POWER = 1.1;
 const CREATURE_VIGNETTE_ZOOM = 1.5;
 const DEFAULT_SIMULATION_STEP_MS = 1000 / 60;
@@ -1894,8 +1895,7 @@ export default function Boids({
     const halfH = h * 0.5;
     const alpha = clamp(interpolationAlpha, 0, 1);
 
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, w, h);
+    ctx.clearRect(0, 0, w, h);
 
     const sk = skeletonRef.current;
     if (sk?.cfg.visible) {
@@ -2013,6 +2013,7 @@ export default function Boids({
           resolution: WebGLUniformLocation | null;
           mouse: WebGLUniformLocation | null;
           pixelation: WebGLUniformLocation | null;
+          saturation: WebGLUniformLocation | null;
         }
       | null = null;
     let blurUniforms:
@@ -2212,6 +2213,10 @@ export default function Boids({
               asciiUniforms!.pixelation,
               CREATURE_ASCII_PIXELATION
             );
+            gl!.uniform1f(
+              asciiUniforms!.saturation,
+              CREATURE_ASCII_SATURATION
+            );
           },
           currentTexture
         );
@@ -2270,12 +2275,17 @@ export default function Boids({
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, rw, rh);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.useProgram(copyProgram);
       bindFullscreenQuad(copyProgram);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, currentTexture);
       gl.uniform1i(copyUniforms.texture, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
+      gl.disable(gl.BLEND);
     };
 
     if (renderMode === "full") {
@@ -2284,6 +2294,7 @@ export default function Boids({
       }
 
       gl = glCanvas.getContext("webgl", {
+        alpha: true,
         premultipliedAlpha: false,
         powerPreference: boidsRuntime.powerPreference,
       });
@@ -2358,6 +2369,7 @@ export default function Boids({
         resolution: gl.getUniformLocation(asciiProgram, "uResolution"),
         mouse: gl.getUniformLocation(asciiProgram, "uMouse"),
         pixelation: gl.getUniformLocation(asciiProgram, "uPixelation"),
+        saturation: gl.getUniformLocation(asciiProgram, "uSaturation"),
       };
       blurUniforms = {
         texture: gl.getUniformLocation(blurProgram, "uTexture"),

@@ -11,6 +11,7 @@ export type BlurPassUniforms = {
 
 export type AsciiPassUniforms = {
   pixelation: number;
+  saturation: number;
 };
 
 export type ChromaticPassUniforms = {
@@ -54,6 +55,7 @@ const PRESET_SETTINGS: Record<
       enabled: false,
       uniforms: {
         pixelation: 1,
+        saturation: 1,
       },
     },
     chromatic: {
@@ -91,6 +93,7 @@ const PRESET_SETTINGS: Record<
       enabled: true,
       uniforms: {
         pixelation: 0.7,
+        saturation: 1,
       },
     },
     chromatic: {
@@ -128,6 +131,7 @@ const PRESET_SETTINGS: Record<
       enabled: true,
       uniforms: {
         pixelation: 0.5,
+        saturation: 1.7,
       },
     },
     chromatic: {
@@ -194,6 +198,7 @@ export const scaleStudioFxSettings = (
       ...settings.ascii,
       uniforms: {
         pixelation: settings.ascii.uniforms.pixelation * scaled,
+        saturation: settings.ascii.uniforms.saturation,
       },
     },
     glow: {

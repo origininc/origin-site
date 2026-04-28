@@ -51,6 +51,8 @@ void main() {
 
   vec3 color = vec3(r, g, b) / iters;
 
-  gl_FragColor = vec4(color, 1.0);
+  // Alpha sampled at centre UV — no aberration, represents content presence
+  float alpha = texture2D(uTexture, uv).a;
+  gl_FragColor = vec4(color, alpha);
 }
 `;

@@ -311,7 +311,7 @@ export default function Home() {
     visualizerOpacityRef.current = visuals.visualizerOpacity;
 
     if (boidsFadeRef.current) {
-      boidsFadeRef.current.style.opacity = `${visuals.boidsOverlayOpacity}`;
+      boidsFadeRef.current.style.opacity = `${1 - visuals.boidsOverlayOpacity}`;
     }
 
     if (heroIntroRef.current) {
@@ -534,17 +534,18 @@ export default function Home() {
         }
       >
         <div className="boids-bg">
-          <Boids
-            disperse={INITIAL_SCROLL_VISUALS.disperseAmount}
-            disperseValueRef={boidsDisperseRef}
-            runtimeProfile={canvasRuntimeProfile}
-            visibilityRefExternal={boidsVisibilityRef}
-          />
           <div
             ref={boidsFadeRef}
-            className="boids-fade"
-            style={{ opacity: INITIAL_SCROLL_VISUALS.boidsOverlayOpacity }}
-          />
+            className="boids-canvas-wrapper"
+            style={{ opacity: 1 - INITIAL_SCROLL_VISUALS.boidsOverlayOpacity }}
+          >
+            <Boids
+              disperse={INITIAL_SCROLL_VISUALS.disperseAmount}
+              disperseValueRef={boidsDisperseRef}
+              runtimeProfile={canvasRuntimeProfile}
+              visibilityRefExternal={boidsVisibilityRef}
+            />
+          </div>
         </div>
 
         <div className="scroll-progress-overlay">
@@ -681,11 +682,9 @@ export default function Home() {
           will-change: transform;
         }
 
-        .boids-fade {
+        .boids-canvas-wrapper {
           position: absolute;
           inset: 0;
-          background: #000000;
-          pointer-events: none;
           will-change: opacity;
         }
 

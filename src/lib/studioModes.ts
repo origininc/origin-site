@@ -11,9 +11,11 @@ export type BoidsStudioSettings = {
 };
 
 export type CymaticsStudioSettings = {
+  baseBlue: number;
+  baseGreen: number;
+  baseRed: number;
   harmonicM: number;
   harmonicN: number;
-  mainHue: number;
   hueShift: number;
   nodePull: number;
   particleDensity: number;
@@ -50,9 +52,11 @@ export const createDefaultBoidsStudioSettings = (): BoidsStudioSettings => ({
 
 export const createDefaultCymaticsStudioSettings =
   (): CymaticsStudioSettings => ({
+    baseBlue: 255,
+    baseGreen: 21,
+    baseRed: 0,
     harmonicM: 2,
     harmonicN: 5,
-    mainHue: 235,
     hueShift: 0.17,
     nodePull: 1,
     particleDensity: 2.3,

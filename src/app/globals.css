@@ -32,6 +32,8 @@ body {
   min-height: 100%;
   color: var(--foreground);
   background: var(--background);
+  background-image: radial-gradient(ellipse at 50% 60%, #0d1a2e 0%, #060a10 55%, #000000 100%);
+  background-attachment: fixed;
   font-family: var(--font-space-grotesk), sans-serif;
   font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;

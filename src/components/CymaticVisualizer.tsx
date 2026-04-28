@@ -118,10 +118,12 @@ const NODE_CLOSENESS_RANGE = 2.2;
 const COLOR_MAX_STRENGTH = 1.0;
 const COLOR_MIN_STRENGTH = 0.9;
 const COLOR_BRIGHTNESS_BOOST = 1.01;
+const COLOR_SATURATION_BOOST = 1.85;
 const HUE_SHIFT_MAX = 0.32;
 const TARGET_AGENT_LUMA = 0.62;
 const MAX_LUMA_LIFT = 1.0;
 const ASCII_PIXELATION = 0.5;
+const ASCII_SATURATION = 1.7;
 const CHROMATIC_STRENGTH = 0.003;
 const GLOW_STRENGTH = 2.4;
 const GLOW_RADIUS = 7.0;
@@ -216,6 +218,15 @@ const shiftHueTowardBrighterLuma = (color: Rgb, amount: number): Rgb => {
   return getLuma(forward) >= getLuma(backward) ? forward : backward;
 };
 
+const boostSaturation = (color: Rgb, amount: number): Rgb => {
+  const luma = getLuma(color);
+  return {
+    r: clamp(luma + (color.r - luma) * amount, 0, 1),
+    g: clamp(luma + (color.g - luma) * amount, 0, 1),
+    b: clamp(luma + (color.b - luma) * amount, 0, 1),
+  };
+};
+
 const getBlend = (value: number) => {
   const clamped = clamp(value, 1, MODES.length);
   const baseIndex = Math.min(MODES.length - 1, Math.max(0, Math.floor(clamped) - 1));
@@ -245,12 +256,6 @@ const getPulseLegacyBlend = (value: number) => {
   const intoPulse = clamp(value - 2, 0, 1);
   const outOfPulse = clamp(value - 3, 0, 1);
   return intoPulse * (1 - outOfPulse);
-};
-
-const getColorValueFromModePair = (mode: ModePair) => {
-  const combined = mode.n + mode.m;
-  const normalized = clamp((combined - 2) / 12, 0, 1);
-  return 1 + normalized * (AGENT_COLORS.length - 1);
 };
 
 const sampleModeField = (x: number, y: number, mode: ModePair): FieldEvaluation => {
@@ -442,7 +447,9 @@ export default function CymaticVisualizer({
   const cymaticsRuntime = runtimeProfile.cymatics;
   const harmonicMRef = useRef(studioSettings?.harmonicM ?? MODES[0].m);
   const harmonicNRef = useRef(studioSettings?.harmonicN ?? MODES[0].n);
-  const mainHueRef = useRef(studioSettings?.mainHue ?? 0);
+  const baseRedRef = useRef(studioSettings?.baseRed ?? 255);
+  const baseGreenRef = useRef(studioSettings?.baseGreen ?? 255);
+  const baseBlueRef = useRef(studioSettings?.baseBlue ?? 255);
   const nodePullRef = useRef(studioSettings?.nodePull ?? NODE_PULL_MIX);
   const hueShiftRef = useRef(studioSettings?.hueShift ?? HUE_SHIFT_MAX);
   const ENABLE_HORIZONTAL_BLUR = cymaticsRuntime.passes.blur;
@@ -457,7 +464,9 @@ export default function CymaticVisualizer({
   internalOpacityRef.current = opacity;
   harmonicMRef.current = studioSettings?.harmonicM ?? MODES[0].m;
   harmonicNRef.current = studioSettings?.harmonicN ?? MODES[0].n;
-  mainHueRef.current = studioSettings?.mainHue ?? 0;
+  baseRedRef.current = studioSettings?.baseRed ?? 255;
+  baseGreenRef.current = studioSettings?.baseGreen ?? 255;
+  baseBlueRef.current = studioSettings?.baseBlue ?? 255;
   nodePullRef.current = studioSettings?.nodePull ?? NODE_PULL_MIX;
   hueShiftRef.current = studioSettings?.hueShift ?? HUE_SHIFT_MAX;
 
@@ -559,6 +568,7 @@ export default function CymaticVisualizer({
           mouse: WebGLUniformLocation | null;
           pixelation: WebGLUniformLocation | null;
           resolution: WebGLUniformLocation | null;
+          saturation: WebGLUniformLocation | null;
           texture: WebGLUniformLocation | null;
         }
       | null = null;
@@ -765,6 +775,7 @@ export default function CymaticVisualizer({
             gl.uniform2f(localAsciiUniforms.resolution, renderW, renderH);
             gl.uniform2f(localAsciiUniforms.mouse, renderW * 0.5, renderH * 0.5);
             gl.uniform1f(localAsciiUniforms.pixelation, ASCII_PIXELATION);
+            gl.uniform1f(localAsciiUniforms.saturation, ASCII_SATURATION);
           },
           currentTexture
         );
@@ -896,6 +907,7 @@ export default function CymaticVisualizer({
         resolution: gl.getUniformLocation(asciiProgram, "uResolution"),
         mouse: gl.getUniformLocation(asciiProgram, "uMouse"),
         pixelation: gl.getUniformLocation(asciiProgram, "uPixelation"),
+        saturation: gl.getUniformLocation(asciiProgram, "uSaturation"),
       };
       chromaticUniforms = {
         texture: gl.getUniformLocation(chromaticProgram, "uTexture"),
@@ -1021,10 +1033,14 @@ export default function CymaticVisualizer({
           }
         : null;
       const blendedField = customMode ? null : getBlend(simValueRef.current);
-      const baseAgentColor = getBlendedAgentColor(
-        customMode ? getColorValueFromModePair(customMode) : simValueRef.current
-      );
-      const agentColor = shiftHue(baseAgentColor, mainHueRef.current / 360);
+      const baseAgentColor = customMode
+        ? {
+            r: clamp(baseRedRef.current / 255, 0, 1),
+            g: clamp(baseGreenRef.current / 255, 0, 1),
+            b: clamp(baseBlueRef.current / 255, 0, 1),
+          }
+        : getBlendedAgentColor(simValueRef.current);
+      const agentColor = baseAgentColor;
       const pulseLegacyBlend = customMode
         ? 0
         : getPulseLegacyBlend(simValueRef.current);
@@ -1128,45 +1144,31 @@ export default function CymaticVisualizer({
           1
         );
         const hueShiftAmount = hueShiftRef.current * Math.pow(radialDistance, 0.7);
-        const shiftedColor = lerpColor(
-          shiftHueTowardBrighterLuma(agentColor, hueShiftAmount),
-          shiftHue(agentColor, hueShiftAmount),
-          pulseLegacyBlend
+        // Shift hue directly — no "toward brighter" steering that distorts the dial
+        const shiftedColor = shiftHue(agentColor, hueShiftAmount);
+
+        // Normalize hue into a stable lightness band, then push chroma back up
+        // so reds/blues do not drift pastel against the darker background.
+        const hsl = rgbToHsl(shiftedColor);
+        const normalizedColor = hslToRgb(hsl.h, hsl.s, 0.55);
+        const saturatedColor = boostSaturation(
+          normalizedColor,
+          COLOR_SATURATION_BOOST
         );
-        const balancedColor = liftColorToLuma(
-          shiftedColor,
-          TARGET_AGENT_LUMA,
-          MAX_LUMA_LIFT
-        );
+
         const colorStrength = lerp(
           COLOR_MIN_STRENGTH,
           COLOR_MAX_STRENGTH,
           nodeCloseness
         );
-        const whiteBase = 0.1;
         const r = Math.round(
-          clamp(
-            (whiteBase + balancedColor.r * colorStrength) *
-              COLOR_BRIGHTNESS_BOOST,
-            0,
-            1
-          ) * 255
+          clamp(saturatedColor.r * colorStrength * COLOR_BRIGHTNESS_BOOST, 0, 1) * 255
         );
         const g = Math.round(
-          clamp(
-            (whiteBase + balancedColor.g * colorStrength) *
-              COLOR_BRIGHTNESS_BOOST,
-            0,
-            1
-          ) * 255
+          clamp(saturatedColor.g * colorStrength * COLOR_BRIGHTNESS_BOOST, 0, 1) * 255
         );
         const b = Math.round(
-          clamp(
-            (whiteBase + balancedColor.b * colorStrength) *
-              COLOR_BRIGHTNESS_BOOST,
-            0,
-            1
-          ) * 255
+          clamp(saturatedColor.b * colorStrength * COLOR_BRIGHTNESS_BOOST, 0, 1) * 255
         );
 
         ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;

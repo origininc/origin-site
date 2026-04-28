@@ -30,9 +30,11 @@ void main() {
   float vig = m.x * m.y * 16.0;
   vig = pow(clamp(vig, 0.0, 1.0), uPower);
 
-  vec3 src = texture2D(uTexture, uv).rgb;
-  vec3 color = mix(src * (1.0 - uStrength), src, vig);
+  vec4 srcSample = texture2D(uTexture, uv);
+  vec3 color = mix(srcSample.rgb * (1.0 - uStrength), srcSample.rgb, vig);
 
-  gl_FragColor = vec4(color, 1.0);
+  // Vignette also fades alpha at edges — gradient background bleeds through naturally
+  float alpha = srcSample.a * mix(1.0 - uStrength, 1.0, vig);
+  gl_FragColor = vec4(color, alpha);
 }
 `;

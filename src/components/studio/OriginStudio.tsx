@@ -168,6 +168,11 @@ const downloadBlob = (blob: Blob, fileName: string) => {
   URL.revokeObjectURL(url);
 };
 
+const createSettingsBlob = (payload: unknown) =>
+  new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+
 const getImageDownloadName = (fileName: string) => {
   const lastDot = fileName.lastIndexOf(".");
   const baseName = lastDot > 0 ? fileName.slice(0, lastDot) : fileName;
@@ -176,6 +181,9 @@ const getImageDownloadName = (fileName: string) => {
 
 const getModeDownloadName = (mode: Exclude<StudioMode, "image">) =>
   `origin-studio-${mode === "boids" ? "creature" : mode}.png`;
+
+const getSettingsDownloadName = (mode: StudioMode) =>
+  `origin-studio-${mode === "boids" ? "creature" : mode}-settings.json`;
 
 const getNumberDigits = (step: number) => {
   const parts = `${step}`.split(".");
@@ -1083,6 +1091,50 @@ export default function OriginStudio() {
     }
   };
 
+  const handleExportSettings = () => {
+    const settingsPayload =
+      mode === "image"
+        ? {
+            version: 1,
+            exportedAt: new Date().toISOString(),
+            mode,
+            fxSettings: structuredClone(imageFxSettings),
+            imageViewport: structuredClone(imageViewport),
+            imageMetadata: imageAsset
+              ? {
+                  fileName: imageAsset.fileName,
+                  originalWidth: imageAsset.originalWidth,
+                  originalHeight: imageAsset.originalHeight,
+                  exportWidth: imageAsset.exportWidth,
+                  exportHeight: imageAsset.exportHeight,
+                  textureLimited: imageAsset.textureLimited,
+                  previewDownscaled: imageAsset.previewDownscaled,
+                }
+              : null,
+          }
+        : mode === "boids"
+          ? {
+              version: 1,
+              exportedAt: new Date().toISOString(),
+              mode,
+              sourceSettings: structuredClone(boidsSettings),
+              fxSettings: structuredClone(boidsFxSettings),
+            }
+          : {
+              version: 1,
+              exportedAt: new Date().toISOString(),
+              mode,
+              sourceSettings: structuredClone(cymaticsSettings),
+              fxSettings: structuredClone(cymaticsFxSettings),
+            };
+
+    downloadBlob(createSettingsBlob(settingsPayload), getSettingsDownloadName(mode));
+    setErrorMessage(null);
+    setStatusMessage(
+      `Settings exported for ${mode === "boids" ? "creature" : mode}.`
+    );
+  };
+
   const metadataRows = useMemo(() => {
     if (mode === "image") {
       if (!imageAsset) {
@@ -1138,8 +1190,10 @@ export default function OriginStudio() {
         value: `n ${cymaticsSettings.harmonicN} / m ${cymaticsSettings.harmonicM}`,
       },
       {
-        label: "Main Hue",
-        value: `${Math.round(cymaticsSettings.mainHue)}°`,
+        label: "Base Color",
+        value: `rgb(${Math.round(cymaticsSettings.baseRed)}, ${Math.round(
+          cymaticsSettings.baseGreen
+        )}, ${Math.round(cymaticsSettings.baseBlue)})`,
       },
       {
         label: "Preview",
@@ -1158,9 +1212,11 @@ export default function OriginStudio() {
     ];
   }, [
     boidsSettings.densityIndex,
+    cymaticsSettings.baseBlue,
+    cymaticsSettings.baseGreen,
+    cymaticsSettings.baseRed,
     cymaticsSettings.harmonicM,
     cymaticsSettings.harmonicN,
-    cymaticsSettings.mainHue,
     cymaticsSettings.particleDensity,
     imageAsset,
     mode,
@@ -1335,6 +1391,13 @@ export default function OriginStudio() {
               <button
                 type="button"
                 className="secondaryButton"
+                onClick={handleExportSettings}
+              >
+                Export Settings
+              </button>
+              <button
+                type="button"
+                className="secondaryButton"
                 onClick={handleExport}
                 disabled={
                   isExporting ||
@@ -1479,12 +1542,28 @@ export default function OriginStudio() {
                 onChange={(value) => updateCymaticsSetting("harmonicM", value)}
               />
               <SliderField
-                label="Main Hue"
+                label="Base Red"
                 min={0}
-                max={360}
+                max={255}
                 step={1}
-                value={cymaticsSettings.mainHue}
-                onChange={(value) => updateCymaticsSetting("mainHue", value)}
+                value={cymaticsSettings.baseRed}
+                onChange={(value) => updateCymaticsSetting("baseRed", value)}
+              />
+              <SliderField
+                label="Base Green"
+                min={0}
+                max={255}
+                step={1}
+                value={cymaticsSettings.baseGreen}
+                onChange={(value) => updateCymaticsSetting("baseGreen", value)}
+              />
+              <SliderField
+                label="Base Blue"
+                min={0}
+                max={255}
+                step={1}
+                value={cymaticsSettings.baseBlue}
+                onChange={(value) => updateCymaticsSetting("baseBlue", value)}
               />
               <SliderField
                 label="Particle Density"
@@ -1563,6 +1642,20 @@ export default function OriginStudio() {
               value={activeFxSettings.ascii.uniforms.pixelation}
               onChange={(value) =>
                 updatePassUniform("ascii", "pixelation", Math.round(value * 10) / 10)
+              }
+            />
+            <SliderField
+              label="Saturation"
+              min={0}
+              max={2.5}
+              step={0.05}
+              value={activeFxSettings.ascii.uniforms.saturation}
+              onChange={(value) =>
+                updatePassUniform(
+                  "ascii",
+                  "saturation",
+                  Math.round(value * 100) / 100
+                )
               }
             />
           </section>

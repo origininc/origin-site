@@ -32,7 +32,8 @@ float luminance(vec3 c) {
 
 void main() {
   vec2 texel = 1.0 / uResolution;
-  vec3 src = texture2D(uTexture, vUv).rgb;
+  vec4 srcSample = texture2D(uTexture, vUv);
+  vec3 src = srcSample.rgb;
 
   vec3 sum = vec3(0.0);
   float weightSum = 0.0;
@@ -45,7 +46,7 @@ void main() {
       float w = 1.0 - length(vec2(float(x), float(y))) / 4.25;
       w = max(w, 0.0);
 
-      float bright = smoothstep(0.08, 0.95, luminance(s));
+      float bright = smoothstep(0.08, 0.95, max(s.r, max(s.g, s.b)));
       w *= mix(0.35, 1.0, bright);
 
       sum += s * w;
@@ -62,6 +63,9 @@ void main() {
 
   vec3 result = src + glow * uGlowStrength + glow * radial * uRadialStrength;
 
-  gl_FragColor = vec4(result, 1.0);
+  // Alpha tracks max channel (HSV value) so saturated low-luma hues (red, blue)
+  // get the same alpha as high-luma hues (yellow, cyan)
+  float alpha = max(srcSample.a, max(result.r, max(result.g, result.b)));
+  gl_FragColor = vec4(result, alpha);
 }
 `;

@@ -57,6 +57,7 @@ type AsciiUniforms = {
   mouse: WebGLUniformLocation | null;
   pixelation: WebGLUniformLocation | null;
   resolution: WebGLUniformLocation | null;
+  saturation: WebGLUniformLocation | null;
   texture: WebGLUniformLocation | null;
 };
 
@@ -293,6 +294,7 @@ export class StudioPostFxRenderer {
       resolution: gl.getUniformLocation(this.asciiProgram, "uResolution"),
       mouse: gl.getUniformLocation(this.asciiProgram, "uMouse"),
       pixelation: gl.getUniformLocation(this.asciiProgram, "uPixelation"),
+      saturation: gl.getUniformLocation(this.asciiProgram, "uSaturation"),
     };
     this.chromaticUniforms = {
       texture: gl.getUniformLocation(this.chromaticProgram, "uTexture"),
@@ -420,6 +422,10 @@ export class StudioPostFxRenderer {
           gl.uniform1f(
             this.asciiUniforms.pixelation,
             settings.ascii.uniforms.pixelation
+          );
+          gl.uniform1f(
+            this.asciiUniforms.saturation,
+            settings.ascii.uniforms.saturation
           );
         },
         currentTexture
