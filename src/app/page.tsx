@@ -418,8 +418,7 @@ export default function Home() {
   const mainRef = useRef<HTMLElement | null>(null);
   const boidsFadeRef = useRef<HTMLDivElement | null>(null);
   const heroIntroRef = useRef<HTMLDivElement | null>(null);
-  const aboutKickerRef = useRef<HTMLDivElement | null>(null);
-  const aboutBodyRef = useRef<HTMLDivElement | null>(null);
+  const aboutCopyRef = useRef<HTMLDivElement | null>(null);
   const scrollHintRef = useRef<HTMLDivElement | null>(null);
   const placeholderVisualizerShellRef = useRef<HTMLDivElement | null>(null);
   const placeholderCardRefs = useRef<Array<HTMLElement | null>>([]);
@@ -459,20 +458,12 @@ export default function Home() {
       heroIntroRef.current.style.filter = getPixelateFilter(visuals.titlePixelate);
     }
 
-    if (aboutKickerRef.current) {
-      aboutKickerRef.current.style.opacity = `${visuals.aboutOpacity}`;
-      aboutKickerRef.current.style.filter = getPixelateFilter(
+    if (aboutCopyRef.current) {
+      aboutCopyRef.current.style.opacity = `${visuals.aboutOpacity}`;
+      aboutCopyRef.current.style.filter = getPixelateFilter(
         visuals.aboutPixelate
       );
-      aboutKickerRef.current.style.transform = `translateY(${visuals.aboutTranslateY}px)`;
-    }
-
-    if (aboutBodyRef.current) {
-      aboutBodyRef.current.style.opacity = `${visuals.aboutOpacity}`;
-      aboutBodyRef.current.style.filter = getPixelateFilter(
-        visuals.aboutPixelate
-      );
-      aboutBodyRef.current.style.transform = `translateY(calc(-50% + ${visuals.aboutTranslateY}px))`;
+      aboutCopyRef.current.style.transform = `translateY(${visuals.aboutTranslateY}px)`;
     }
 
     if (scrollHintRef.current) {
@@ -678,6 +669,7 @@ export default function Home() {
 
       <main
         ref={mainRef}
+        data-mobile-runtime={canvasRuntimeProfile.isMobile ? "true" : "false"}
         style={
           {
             "--scroll-overlay-opacity": "0",
@@ -722,31 +714,23 @@ export default function Home() {
           </div>
 
           <div
-            ref={aboutKickerRef}
-            className="about-kicker about-left"
+            ref={aboutCopyRef}
+            className="about-copy"
             style={{
               filter: getPixelateFilter(INITIAL_SCROLL_VISUALS.aboutPixelate),
               opacity: INITIAL_SCROLL_VISUALS.aboutOpacity,
               transform: `translateY(${INITIAL_SCROLL_VISUALS.aboutTranslateY}px)`,
             }}
           >
-            about
-          </div>
+            <div className="about-kicker about-left">about</div>
 
-          <div
-            ref={aboutBodyRef}
-            className="about-body"
-            style={{
-              filter: getPixelateFilter(INITIAL_SCROLL_VISUALS.aboutPixelate),
-              opacity: INITIAL_SCROLL_VISUALS.aboutOpacity,
-              transform: `translateY(calc(-50% + ${INITIAL_SCROLL_VISUALS.aboutTranslateY}px))`,
-            }}
-          >
-            <p>
-              origin partners with labels, live entertainment companies, and
-              catalog managers to build intelligence systems that form the
-              instincts behind every decision.
-            </p>
+            <div className="about-body">
+              <p>
+                origin partners with labels, live entertainment companies, and
+                catalog managers to build intelligence systems that form the
+                instincts behind every decision.
+              </p>
+            </div>
           </div>
 
           <div
@@ -1011,6 +995,12 @@ export default function Home() {
           white-space: nowrap;
         }
 
+        .about-copy {
+          position: absolute;
+          inset: 0;
+          will-change: filter, opacity, transform;
+        }
+
         .about-left {
           position: absolute;
           top: var(--section-header-top-offset);
@@ -1023,13 +1013,13 @@ export default function Home() {
           left: var(--about-left-offset);
           width: min(770px, calc(100vw - 124px));
           max-width: 770px;
-          will-change: filter, opacity, transform;
+          transform: translateY(-50%);
         }
 
         .about-kicker,
         .placeholder-title {
           font-family: var(--font-space-grotesk);
-          font-size: clamp(16px, 2.3vw, 28px);
+          font-size: clamp(18px, 2.55vw, 31px);
           font-weight: 400;
           line-height: 1.1;
           letter-spacing: 0.03em;
@@ -1052,7 +1042,7 @@ export default function Home() {
         .about-body p,
         .placeholder-body p {
           font-family: var(--font-space-grotesk);
-          font-size: clamp(16px, 2.3vw, 28px);
+          font-size: clamp(18px, 2.55vw, 31px);
           line-height: 1.75;
           color: rgba(255, 255, 255, 0.9);
           margin-bottom: 1.6em;
@@ -1094,30 +1084,82 @@ export default function Home() {
           will-change: opacity, filter, transform;
         }
 
-        @media (max-width: 900px) {
-          .scroll-progress-overlay {
-            top: 20px;
-            width: 52px;
-            height: calc(100vh - 40px);
-          }
+        main[data-mobile-runtime="true"] .scroll-progress-overlay {
+          display: none;
+        }
 
-          .scroll-progress-indicator {
-            right: 20px;
-            width: 4px;
-          }
+        main[data-mobile-runtime="true"] .placeholder-overlay {
+          --about-left-offset: 24px;
+          --section-header-top-offset: 0px;
+          --overlay-content-width: calc(100vw - 48px);
+          --text-column-width: calc(100vw - 48px);
+          --text-column-right: calc(var(--about-left-offset) + var(--text-column-width));
+          padding: 20px 24px 36px;
+        }
 
-          .placeholder-overlay {
-            padding: 40px 24px 120px;
-          }
+        main[data-mobile-runtime="true"] .placeholder-copy {
+          position: absolute;
+          inset: auto 0 0 0;
+          height: 46vh;
+        }
 
-          .placeholder-visualizer {
-            top: auto;
-            right: auto;
-            bottom: 24px;
-            left: 50%;
-            width: min(388px, calc(100vw - 56px));
-            transform: translateX(-50%);
-          }
+        main[data-mobile-runtime="true"] .placeholder-card {
+          inset: auto 0 0 0;
+          height: 46vh;
+          padding: 0 24px 36px;
+          display: flex;
+          flex-direction: column;
+          justify-content: flex-end;
+        }
+
+        main[data-mobile-runtime="true"] .placeholder-title {
+          position: static;
+          margin: 0;
+        }
+
+        main[data-mobile-runtime="true"] .placeholder-body {
+          position: static;
+          top: auto;
+          left: auto;
+          width: 100%;
+          max-width: none;
+          margin-top: 18px;
+          padding-top: 18px;
+          border-top: 1px solid rgba(255, 255, 255, 0.18);
+          transform: none;
+        }
+
+        main[data-mobile-runtime="true"] .placeholder-visualizer {
+          top: 25vh;
+          left: 50%;
+          bottom: auto;
+          width: min(78vw, 384px);
+          transform: translate(-50%, -50%);
+        }
+
+        main[data-mobile-runtime="true"] .about-copy {
+          inset: auto 24px 36px;
+          height: 46vh;
+          display: flex;
+          flex-direction: column;
+          justify-content: flex-end;
+        }
+
+        main[data-mobile-runtime="true"] .about-left {
+          position: static;
+          margin: 0;
+        }
+
+        main[data-mobile-runtime="true"] .about-body {
+          position: static;
+          top: auto;
+          left: auto;
+          width: 100%;
+          max-width: none;
+          margin-top: 18px;
+          padding-top: 18px;
+          border-top: 1px solid rgba(255, 255, 255, 0.18);
+          transform: none;
         }
 
         .placeholder-body {
