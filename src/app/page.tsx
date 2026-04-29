@@ -414,7 +414,11 @@ const PLACEHOLDER_PAIRS = [
 const INITIAL_SCROLL_VISUALS = getScrollVisualSnapshot(0, 1, 1, 0);
 
 export default function Home() {
-  const canvasRuntimeProfile = useCanvasRuntimeProfile();
+  const {
+    isMobile: isMobileRuntime,
+    isReady: runtimeReady,
+    profile: canvasRuntimeProfile,
+  } = useCanvasRuntimeProfile();
   const mainRef = useRef<HTMLElement | null>(null);
   const boidsFadeRef = useRef<HTMLDivElement | null>(null);
   const heroIntroRef = useRef<HTMLDivElement | null>(null);
@@ -669,7 +673,7 @@ export default function Home() {
 
       <main
         ref={mainRef}
-        data-mobile-runtime={canvasRuntimeProfile.isMobile ? "true" : "false"}
+        data-mobile-runtime={isMobileRuntime ? "true" : "false"}
         style={
           {
             "--scroll-overlay-opacity": "0",
@@ -682,18 +686,20 @@ export default function Home() {
         }
       >
         <div className="boids-bg">
-          <div
-            ref={boidsFadeRef}
-            className="boids-canvas-wrapper"
-            style={{ opacity: 1 - INITIAL_SCROLL_VISUALS.boidsOverlayOpacity }}
-          >
-            <Boids
-              disperse={INITIAL_SCROLL_VISUALS.disperseAmount}
-              disperseValueRef={boidsDisperseRef}
-              runtimeProfile={canvasRuntimeProfile}
-              visibilityRefExternal={boidsVisibilityRef}
-            />
-          </div>
+          {runtimeReady && !isMobileRuntime ? (
+            <div
+              ref={boidsFadeRef}
+              className="boids-canvas-wrapper"
+              style={{ opacity: 1 - INITIAL_SCROLL_VISUALS.boidsOverlayOpacity }}
+            >
+              <Boids
+                disperse={INITIAL_SCROLL_VISUALS.disperseAmount}
+                disperseValueRef={boidsDisperseRef}
+                runtimeProfile={canvasRuntimeProfile!}
+                visibilityRefExternal={boidsVisibilityRef}
+              />
+            </div>
+          ) : null}
         </div>
 
         <div className="scroll-progress-overlay">
@@ -813,15 +819,17 @@ export default function Home() {
                 HOMEPAGE_CYMATIC_AGENT_VARIANTS
               )}
             >
-              <CymaticVisualizer
-                agentVariants={HOMEPAGE_CYMATIC_AGENT_VARIANTS}
-                sharedPreset={HOMEPAGE_CYMATIC_SHARED_PRESET}
-                value={INITIAL_SCROLL_VISUALS.visualizerValue}
-                opacity={1}
-                opacityRefExternal={visualizerOpacityRef}
-                runtimeProfile={canvasRuntimeProfile}
-                valueRefExternal={visualizerValueRef}
-              />
+              {runtimeReady && !isMobileRuntime ? (
+                <CymaticVisualizer
+                  agentVariants={HOMEPAGE_CYMATIC_AGENT_VARIANTS}
+                  sharedPreset={HOMEPAGE_CYMATIC_SHARED_PRESET}
+                  value={INITIAL_SCROLL_VISUALS.visualizerValue}
+                  opacity={1}
+                  opacityRefExternal={visualizerOpacityRef}
+                  runtimeProfile={canvasRuntimeProfile!}
+                  valueRefExternal={visualizerValueRef}
+                />
+              ) : null}
             </GlassOrb>
           </div>
         </div>
