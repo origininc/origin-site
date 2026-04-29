@@ -26,22 +26,23 @@ uniform float uRadialFalloff;
 
 varying vec2 vUv;
 
-float luminance(vec3 c) {
-  return dot(c, vec3(0.2126, 0.7152, 0.0722));
-}
-
 void main() {
   vec2 texel = 1.0 / uResolution;
   vec4 srcSample = texture2D(uTexture, vUv);
   vec3 src = srcSample.rgb;
+  float srcAlpha = srcSample.a;
+  vec3 srcPremul = src * srcAlpha;
 
-  vec3 sum = vec3(0.0);
+  vec3 premulSum = vec3(0.0);
+  float alphaSum = 0.0;
   float weightSum = 0.0;
 
   for (int x = -3; x <= 3; x++) {
     for (int y = -3; y <= 3; y++) {
       vec2 offset = vec2(float(x), float(y)) * texel * uGlowRadius;
-      vec3 s = texture2D(uTexture, vUv + offset).rgb;
+      vec4 sample = texture2D(uTexture, vUv + offset);
+      vec3 s = sample.rgb;
+      float sampleAlpha = sample.a;
 
       float w = 1.0 - length(vec2(float(x), float(y))) / 4.25;
       w = max(w, 0.0);
@@ -49,23 +50,27 @@ void main() {
       float bright = smoothstep(0.08, 0.95, max(s.r, max(s.g, s.b)));
       w *= mix(0.35, 1.0, bright);
 
-      sum += s * w;
+      premulSum += s * sampleAlpha * w;
+      alphaSum += sampleAlpha * w;
       weightSum += w;
     }
   }
 
-  vec3 blurred = sum / max(weightSum, 0.0001);
+  float blurredAlpha = alphaSum / max(weightSum, 0.0001);
+  vec3 blurred = alphaSum > 1e-5 ? premulSum / alphaSum : vec3(0.0);
   vec3 glow = max(blurred - src * 0.35, 0.0);
 
   vec2 centered = vUv - 0.5;
   float dist = length(centered) * 2.0;
   float radial = pow(max(0.0, 1.0 - dist), uRadialFalloff);
+  float glowGain = uGlowStrength + radial * uRadialStrength;
+  float glowAlpha = clamp(max(blurredAlpha - srcAlpha * 0.35, 0.0) * glowGain, 0.0, 1.0);
+  vec3 glowPremul = glow * glowAlpha;
+  vec3 resultPremul = srcPremul + glowPremul;
+  float resultAlpha = clamp(srcAlpha + glowAlpha * (1.0 - srcAlpha), 0.0, 1.0);
+  vec3 result =
+    resultAlpha > 1e-5 ? resultPremul / resultAlpha : vec3(0.0);
 
-  vec3 result = src + glow * uGlowStrength + glow * radial * uRadialStrength;
-
-  // Alpha tracks max channel (HSV value) so saturated low-luma hues (red, blue)
-  // get the same alpha as high-luma hues (yellow, cyan)
-  float alpha = max(srcSample.a, max(result.r, max(result.g, result.b)));
-  gl_FragColor = vec4(result, alpha);
+  gl_FragColor = vec4(result, resultAlpha);
 }
 `;

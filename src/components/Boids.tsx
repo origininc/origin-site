@@ -61,17 +61,19 @@ void main() {
 }
 `;
 
+
 const CREATURE_BLUR_AMOUNT = 6.0;
 const CREATURE_ASCII_PIXELATION = 0.7;
 const CREATURE_ASCII_SATURATION = 1.0;
 const CREATURE_CHROMATIC_STRENGTH = 0.003;
-const CREATURE_GLOW_STRENGTH = 3.5;
+const CREATURE_GLOW_STRENGTH = 3.0;
 const CREATURE_GLOW_RADIUS = 6.0;
 const CREATURE_GLOW_RADIAL_STRENGTH = 3.0;
 const CREATURE_GLOW_RADIAL_FALLOFF = 1.65;
 const CREATURE_VIGNETTE_STRENGTH = 0.5;
 const CREATURE_VIGNETTE_POWER = 1.1;
 const CREATURE_VIGNETTE_ZOOM = 1.5;
+const CREATURE_MAX_VELOCITY_TURN = Math.PI / 24;
 const DEFAULT_SIMULATION_STEP_MS = 1000 / 60;
 const DESKTOP_MAX_SIMULATION_STEPS_PER_FRAME = 3;
 const THROTTLED_MAX_SIMULATION_STEPS_PER_FRAME = 2;
@@ -110,6 +112,39 @@ const wrapCoord = (value: number, size: number) => {
 const smoothstep = (edge0: number, edge1: number, x: number) => {
   const t = clamp((x - edge0) / Math.max(1e-6, edge1 - edge0), 0, 1);
   return t * t * (3 - 2 * t);
+};
+const wrapAngleDelta = (value: number) => {
+  if (value > Math.PI) return value - Math.PI * 2;
+  if (value < -Math.PI) return value + Math.PI * 2;
+  return value;
+};
+const clampTurnDelta = (
+  currentX: number,
+  currentY: number,
+  nextX: number,
+  nextY: number,
+  maxTurn: number
+) => {
+  const currentMag = Math.hypot(currentX, currentY);
+  const nextMag = Math.hypot(nextX, nextY);
+
+  if (currentMag <= 1e-6 || nextMag <= 1e-6) {
+    return { x: nextX, y: nextY };
+  }
+
+  const currentAngle = Math.atan2(currentY, currentX);
+  const nextAngle = Math.atan2(nextY, nextX);
+  const delta = wrapAngleDelta(nextAngle - currentAngle);
+
+  if (Math.abs(delta) <= maxTurn) {
+    return { x: nextX, y: nextY };
+  }
+
+  const clampedAngle = currentAngle + Math.sign(delta) * maxTurn;
+  return {
+    x: Math.cos(clampedAngle) * nextMag,
+    y: Math.sin(clampedAngle) * nextMag,
+  };
 };
 const approxLen = (a: Vec2, b: Vec2) => Math.hypot(b.x - a.x, b.y - a.y);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -400,7 +435,7 @@ const LIFE_SIM_PRESET: Preset = {
     tailRibLength: 70,
     headSize: 30,
     headSpeed: 2.2,
-    maxTurn: Math.PI / 90,
+    maxTurn: Math.PI / 150,
     avoidEdges: 2,
     centerBias: 0.012,
     color: "#fff",
@@ -1005,14 +1040,9 @@ export default function Boids({
     }
 
     const head = nodes[0];
-    const center = { x: w * 0.5, y: h * 0.5 };
     const dTheta = rand(-cfg.maxTurn, cfg.maxTurn);
 
     let steer = { x: 0, y: 0 };
-    const toCtr = V.subNew(center, head);
-    V.setMag(toCtr, cfg.centerBias);
-    steer.x += toCtr.x;
-    steer.y += toCtr.y;
 
     const mode = mouseModeRef.current;
     const mouse = mouseRef.current;
@@ -1179,7 +1209,6 @@ export default function Boids({
     const disperseT = clamp(effectiveDisperseRef.current, 0, 1);
     const flockHold = lerp(1, 0.25, disperseT);
     const structureHold = lerp(1, 0.1, disperseT);
-    const homeHold = lerp(1, 1.8, disperseT);
     const disperseNeighborBoost = lerp(1, 1.4, disperseT);
     const desiredSeparationBoost = lerp(1, 2.6, disperseT);
     const sepForceBoost = lerp(1, 4.5, disperseT);
@@ -1205,13 +1234,10 @@ export default function Boids({
       mouseCoreRepelMult,
       sepBoostR1,
       localFlockDampen,
-      homeWeight,
     } = base;
 
     const speciesList = normalizedSpeciesRef.current;
     const speciesCount = speciesList.length;
-    const centerX = w * 0.5;
-    const centerY = h * 0.5;
     const halfW = w * 0.5;
     const halfH = h * 0.5;
     const maxDimension = Math.max(w, h);
@@ -1327,6 +1353,8 @@ export default function Boids({
       const bpy = bp.y;
       let bvx = b.v.x;
       let bvy = b.v.y;
+      const prevVx = bvx;
+      const prevVy = bvy;
       let ax = 0;
       let ay = 0;
 
@@ -1818,29 +1846,6 @@ export default function Boids({
         }
       }
 
-      {
-        let steerX = centerX - bpx;
-        let steerY = centerY - bpy;
-        let magSq = steerX * steerX + steerY * steerY;
-        if (magSq > 1e-12) {
-          const scale = (maxSpeedEff * 0.15) / Math.sqrt(magSq);
-          steerX *= scale;
-          steerY *= scale;
-        }
-        steerX -= bvx;
-        steerY -= bvy;
-        const homeLimit = maxForceEff * 0.6;
-        const homeLimitSq = homeLimit * homeLimit;
-        magSq = steerX * steerX + steerY * steerY;
-        if (magSq > homeLimitSq) {
-          const scale = homeLimit / Math.sqrt(magSq);
-          steerX *= scale;
-          steerY *= scale;
-        }
-        ax += steerX * homeWeight * homeHold;
-        ay += steerY * homeWeight * homeHold;
-      }
-
       b.a.x = ax;
       b.a.y = ay;
       bvx += ax;
@@ -1851,6 +1856,15 @@ export default function Boids({
         bvx *= scale;
         bvy *= scale;
       }
+      const clampedTurn = clampTurnDelta(
+        prevVx,
+        prevVy,
+        bvx,
+        bvy,
+        CREATURE_MAX_VELOCITY_TURN
+      );
+      bvx = clampedTurn.x;
+      bvy = clampedTurn.y;
       b.v.x = bvx;
       b.v.y = bvy;
 

@@ -1,5 +1,9 @@
 :root {
   --background: #000000;
+  --background-noise-fine: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='2.4' numOctaves='1' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='64' height='64' filter='url(%23n)' opacity='0.2'/%3E%3C/svg%3E");
+  --background-noise-coarse: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='112' height='112' viewBox='0 0 112 112'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.2' numOctaves='1' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='112' height='112' filter='url(%23n)' opacity='0.14'/%3E%3C/svg%3E");
+  --font-space-grotesk: "Garamond", "Adobe Garamond Pro", "Cormorant Garamond",
+    "Baskerville", "Times New Roman", serif;
   --foreground: #ededed;
 }
 
@@ -29,15 +33,148 @@ body::-webkit-scrollbar {
 }
 
 body {
+  position: relative;
+  isolation: isolate;
   min-height: 100%;
   color: var(--foreground);
   background: var(--background);
-  background-image: radial-gradient(ellipse at 50% 60%, #0d1a2e 0%, #060a10 55%, #000000 100%);
+  background-image:
+    var(--background-noise-fine),
+    var(--background-noise-coarse),
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.016) 0 1px,
+      rgba(0, 0, 0, 0.016) 1px 2px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.012) 0 1px,
+      rgba(0, 0, 0, 0.012) 1px 2px
+    ),
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.008) 0 1px,
+      rgba(0, 0, 0, 0.008) 1px 3px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(255, 255, 255, 0.006) 0 1px,
+      rgba(0, 0, 0, 0.006) 1px 3px
+    ),
+    radial-gradient(
+      ellipse at 50% 18%,
+      #102022 0%,
+      #071114 42%,
+      #020508 100%
+    );
+  background-size: 64px 64px, 112px 112px, 2px 2px, 2px 2px, 3px 3px, 3px 3px, auto;
+  background-repeat: repeat, repeat, repeat, repeat, repeat, repeat, no-repeat;
   background-attachment: fixed;
+  background-blend-mode:
+    overlay,
+    soft-light,
+    soft-light,
+    soft-light,
+    overlay,
+    overlay,
+    normal;
   font-family: var(--font-space-grotesk), sans-serif;
   font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: -18vh -18vw;
+  pointer-events: none;
+  z-index: -1;
+  will-change: transform, opacity;
+}
+
+body::before {
+  background:
+    radial-gradient(
+      ellipse at 24% 12%,
+      rgba(86, 101, 97, 0.022) 0%,
+      rgba(48, 59, 58, 0.011) 24%,
+      rgba(22, 30, 31, 0.004) 48%,
+      rgba(0, 0, 0, 0) 72%
+    ),
+    radial-gradient(
+      ellipse at 78% 22%,
+      rgba(75, 93, 88, 0.013) 0%,
+      rgba(34, 45, 45, 0.005) 36%,
+      rgba(0, 0, 0, 0) 74%
+    );
+  background-size: auto, auto;
+  background-repeat: no-repeat, no-repeat;
+  background-blend-mode: normal, normal;
+  filter: blur(42px);
+  opacity: 0.34;
+  transform: translate3d(0, 0, 0) scale(1.08);
+  animation: background-light-sway-a 24s ease-in-out infinite alternate;
+}
+
+body::after {
+  background:
+    radial-gradient(
+      ellipse at 68% 10%,
+      rgba(90, 106, 102, 0.012) 0%,
+      rgba(42, 56, 55, 0.005) 28%,
+      rgba(0, 0, 0, 0) 68%
+    ),
+    radial-gradient(
+      ellipse at 22% 34%,
+      rgba(52, 66, 65, 0.011) 0%,
+      rgba(22, 31, 31, 0.004) 32%,
+      rgba(0, 0, 0, 0) 70%
+    );
+  background-size: auto, auto;
+  background-repeat: no-repeat, no-repeat;
+  background-blend-mode: normal, normal;
+  filter: blur(56px);
+  opacity: 0.24;
+  transform: translate3d(0, 0, 0) scale(1.12);
+  animation: background-light-sway-b 30s ease-in-out infinite alternate;
+}
+
+@keyframes background-light-sway-a {
+  0% {
+    transform: translate3d(-11%, 0, 0) scale(1.08);
+  }
+
+  50% {
+    transform: translate3d(0%, 0, 0) scale(1.1);
+  }
+
+  100% {
+    transform: translate3d(11%, 0, 0) scale(1.08);
+  }
+}
+
+@keyframes background-light-sway-b {
+  0% {
+    transform: translate3d(8%, 0, 0) scale(1.12);
+  }
+
+  50% {
+    transform: translate3d(0%, 0, 0) scale(1.14);
+  }
+
+  100% {
+    transform: translate3d(-8%, 0, 0) scale(1.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after {
+    animation: none;
+    transform: none;
+  }
 }
 
 a {

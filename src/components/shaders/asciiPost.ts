@@ -47,7 +47,9 @@ void main() {
     (floor(uv / 8.0) * 8.0 + (0.5 / uPixelation)) /
     (uResolution.xy / uPixelation);
 
-  vec3 col = texture2D(uTexture, cursorPosition).rgb;
+  vec4 srcSample = texture2D(uTexture, cursorPosition);
+  vec3 col = srcSample.rgb;
+  float sourceAlpha = srcSample.a;
 
   // Use peak channel intensity for glyph density so saturated hues
   // (especially red/blue) are not treated as artificially "dark".
@@ -75,18 +77,20 @@ void main() {
   else n = 11512810.0;
 
   vec2 p = fract(uv * 0.125);
+  float glyphMask = character(n, p);
 
   col = pow(col, vec3(0.55));
-  col = col * character(n, p);
+  col = col * glyphMask;
   float colLuma = dot(col, vec3(0.2126, 0.7152, 0.0722));
   vec3 grayCol = vec3(colLuma);
   col = clamp(grayCol + (col - grayCol) * uSaturation, 0.0, 1.0);
 
   float mixAmt = 1.0;
-  col = mix(vec3(character(n, p)), col, mixAmt);
+  col = mix(vec3(glyphMask), col, mixAmt);
 
-  // Alpha: brightness of final output — dark/empty cells are transparent
-  float alpha = max(max(col.r, col.g), col.b);
+  // Preserve real source coverage through the glyph mask instead of
+  // deriving alpha from perceived brightness.
+  float alpha = sourceAlpha * glyphMask;
   gl_FragColor = vec4(col, alpha);
 }
 `;

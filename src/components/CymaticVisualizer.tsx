@@ -1,6 +1,7 @@
 "use client";
 
 import type { CymaticsStudioSettings } from "@/lib/studioModes";
+import type { StudioFxSettings } from "@/lib/studioFx";
 import type { MutableRefObject } from "react";
 import {
   asciiPostFrag,
@@ -28,11 +29,17 @@ import {
   type CanvasRuntimeProfile,
 } from "@/lib/canvasRuntime";
 import {
+  desaturateRgbPerceptual,
+  getTransitionSaturation,
+  mixRgbPerceptual,
+} from "@/lib/colorMix";
+import {
   isRuntimeProfilerEnabled,
   recordRuntimeMetric,
 } from "@/lib/runtimeProfiler";
 
 type CymaticVisualizerProps = {
+  agentVariants?: CymaticAgentVariant[];
   className?: string;
   opacityRefExternal?: MutableRefObject<number>;
   value: number;
@@ -40,6 +47,7 @@ type CymaticVisualizerProps = {
   opacity?: number;
   renderMode?: "full" | "source";
   runtimeProfile?: CanvasRuntimeProfile;
+  sharedPreset?: CymaticSharedPreset;
   sourceCanvasRef?: MutableRefObject<HTMLCanvasElement | null>;
   studioSettings?: CymaticsStudioSettings;
 };
@@ -72,6 +80,19 @@ type FieldEvaluation = {
   gradY: number;
 };
 
+export type CymaticSharedPreset = {
+  fxSettings: StudioFxSettings;
+  sourceSettings: Pick<
+    CymaticsStudioSettings,
+    "hueShift" | "nodePull" | "particleDensity" | "particleSize"
+  >;
+};
+
+export type CymaticAgentVariant = Pick<
+  CymaticsStudioSettings,
+  "baseBlue" | "baseGreen" | "baseRed" | "harmonicM" | "harmonicN"
+>;
+
 const copyVert = `
 precision mediump float;
 
@@ -91,10 +112,7 @@ uniform sampler2D uTexture;
 varying vec2 vUv;
 
 void main() {
-  vec4 col = texture2D(uTexture, vUv);
-  float luma = dot(col.rgb, vec3(0.2126, 0.7152, 0.0722));
-  float alpha = step(0.001, luma);
-  gl_FragColor = vec4(col.rgb, alpha);
+  gl_FragColor = texture2D(uTexture, vUv);
 }
 `;
 
@@ -105,7 +123,7 @@ const MODES: ModePair[] = [
   { n: 2, m: 7 },
 ];
 const AGENT_COLORS: Rgb[] = [
-  { r: 0.0, g: 0.0, b: 1.0 },
+  { r: 1.0, g: 1.0, b: 1.0 },
   { r: 1.0, g: 0.0, b: 0.0 },
   { r: 0.0, g: 1.0, b: 1.0 },
   { r: 1.0, g: 0.15, b: 0.72 },
@@ -125,16 +143,17 @@ const COLOR_NEUTRAL_SATURATION_END = 0.18;
 const HUE_SHIFT_MAX = 0.32;
 const TARGET_AGENT_LUMA = 0.62;
 const MAX_LUMA_LIFT = 1.0;
-const ASCII_PIXELATION = 0.5;
+const ASCII_PIXELATION = 0.4;
 const ASCII_SATURATION = 1.7;
-const CHROMATIC_STRENGTH = 0.003;
+const CHROMATIC_STRENGTH = 0.002;
 const GLOW_STRENGTH = 2.4;
 const GLOW_RADIUS = 7.0;
 const GLOW_RADIAL_STRENGTH = 0.8;
 const GLOW_RADIAL_FALLOFF = 1.45;
-const VIGNETTE_STRENGTH = 3.0;
-const VIGNETTE_POWER = 1.1;
-const VIGNETTE_ZOOM = 1.5;
+const VIGNETTE_STRENGTH = 1.3;
+const VIGNETTE_POWER = 0.8;
+const VIGNETTE_ZOOM = 1.3;
+const DEFAULT_PARTICLE_SIZE = 2.45;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
@@ -273,6 +292,37 @@ const getBlendedAgentColor = (value: number) => {
   const mix = nextIndex === baseIndex ? 0 : clamped - (baseIndex + 1);
 
   return lerpColor(AGENT_COLORS[baseIndex], AGENT_COLORS[nextIndex], mix);
+};
+
+const getDefaultHomepageVariant = (index: number): CymaticAgentVariant => {
+  const safeIndex = Math.min(MODES.length - 1, Math.max(0, index));
+  const mode = MODES[safeIndex];
+  const color = AGENT_COLORS[safeIndex];
+
+  return {
+    baseBlue: Math.round(color.b * 255),
+    baseGreen: Math.round(color.g * 255),
+    baseRed: Math.round(color.r * 255),
+    harmonicM: mode.m,
+    harmonicN: mode.n,
+  };
+};
+
+const getAgentVariantBlend = (
+  value: number,
+  variants?: CymaticAgentVariant[]
+) => {
+  const count = Math.max(MODES.length, variants?.length ?? 0);
+  const clamped = clamp(value, 1, count);
+  const baseIndex = Math.min(count - 1, Math.max(0, Math.floor(clamped) - 1));
+  const nextIndex = Math.min(count - 1, baseIndex + 1);
+  const mix = nextIndex === baseIndex ? 0 : clamped - (baseIndex + 1);
+
+  return {
+    a: variants?.[baseIndex] ?? getDefaultHomepageVariant(baseIndex),
+    b: variants?.[nextIndex] ?? getDefaultHomepageVariant(nextIndex),
+    mix,
+  };
 };
 
 const getPulseLegacyBlend = (value: number) => {
@@ -421,6 +471,46 @@ const projectTowardNodeForMode = (
   };
 };
 
+const projectTowardBlendedModes = (
+  x: number,
+  y: number,
+  blend: ReturnType<typeof getBlend>,
+  projectionSteps: number
+) => {
+  const projectionA = projectTowardNodeForMode(x, y, blend.a, projectionSteps);
+  if (blend.mix <= 1e-6) {
+    return projectionA;
+  }
+
+  const projectionB = projectTowardNodeForMode(x, y, blend.b, projectionSteps);
+
+  return {
+    gradientX: lerp(projectionA.gradientX, projectionB.gradientX, blend.mix),
+    gradientY: lerp(projectionA.gradientY, projectionB.gradientY, blend.mix),
+    sourceEnergy: lerp(
+      projectionA.sourceEnergy,
+      projectionB.sourceEnergy,
+      blend.mix
+    ),
+    x: lerp(projectionA.x, projectionB.x, blend.mix),
+    y: lerp(projectionA.y, projectionB.y, blend.mix),
+  };
+};
+
+const fieldEnergyForBlendedModes = (
+  x: number,
+  y: number,
+  blend: ReturnType<typeof getBlend>
+) => {
+  const energyA = fieldEnergyForMode(x, y, blend.a);
+  if (blend.mix <= 1e-6) {
+    return energyA;
+  }
+
+  const energyB = fieldEnergyForMode(x, y, blend.b);
+  return lerp(energyA, energyB, blend.mix);
+};
+
 const randomParticle = (): Particle => {
   const x = Math.random() * 1.9 - 0.95;
   const y = Math.random() * 1.9 - 0.95;
@@ -438,6 +528,7 @@ const randomParticle = (): Particle => {
 };
 
 export default function CymaticVisualizer({
+  agentVariants,
   className,
   opacityRefExternal,
   value,
@@ -445,6 +536,7 @@ export default function CymaticVisualizer({
   opacity = 1,
   renderMode = "full",
   runtimeProfile = DESKTOP_CANVAS_RUNTIME,
+  sharedPreset,
   sourceCanvasRef,
   studioSettings,
 }: CymaticVisualizerProps) {
@@ -468,21 +560,43 @@ export default function CymaticVisualizer({
   const internalOpacityRef = useRef(opacity);
   const opacityRef = opacityRefExternal ?? internalOpacityRef;
   const cymaticsRuntime = runtimeProfile.cymatics;
+  const sharedSourceSettings = sharedPreset?.sourceSettings;
+  const sharedFxSettings = sharedPreset?.fxSettings;
   const harmonicMRef = useRef(studioSettings?.harmonicM ?? MODES[0].m);
   const harmonicNRef = useRef(studioSettings?.harmonicN ?? MODES[0].n);
   const baseRedRef = useRef(studioSettings?.baseRed ?? 255);
   const baseGreenRef = useRef(studioSettings?.baseGreen ?? 255);
   const baseBlueRef = useRef(studioSettings?.baseBlue ?? 255);
-  const nodePullRef = useRef(studioSettings?.nodePull ?? NODE_PULL_MIX);
-  const hueShiftRef = useRef(studioSettings?.hueShift ?? HUE_SHIFT_MAX);
-  const particleSizeRef = useRef(studioSettings?.particleSize ?? 1);
+  const nodePullRef = useRef(
+    studioSettings?.nodePull ?? sharedSourceSettings?.nodePull ?? NODE_PULL_MIX
+  );
+  const hueShiftRef = useRef(
+    studioSettings?.hueShift ?? sharedSourceSettings?.hueShift ?? HUE_SHIFT_MAX
+  );
+  const particleSizeRef = useRef(
+    studioSettings?.particleSize ??
+      sharedSourceSettings?.particleSize ??
+      DEFAULT_PARTICLE_SIZE
+  );
   const ENABLE_HORIZONTAL_BLUR = cymaticsRuntime.passes.blur;
   const ENABLE_ASCII = cymaticsRuntime.passes.ascii;
   const ENABLE_CHROMATIC = cymaticsRuntime.passes.chromatic;
   const ENABLE_RADIAL_GLOW = cymaticsRuntime.passes.glow;
   const ENABLE_VIGNETTE = cymaticsRuntime.passes.vignette;
+  const blurPassEnabled =
+    ENABLE_HORIZONTAL_BLUR && (sharedFxSettings?.blur.enabled ?? true);
+  const asciiPassEnabled =
+    ENABLE_ASCII && (sharedFxSettings?.ascii.enabled ?? true);
+  const chromaticPassEnabled =
+    ENABLE_CHROMATIC && (sharedFxSettings?.chromatic.enabled ?? true);
+  const glowPassEnabled =
+    ENABLE_RADIAL_GLOW && (sharedFxSettings?.glow.enabled ?? true);
+  const vignettePassEnabled =
+    ENABLE_VIGNETTE && (sharedFxSettings?.vignette.enabled ?? true);
   const densityMultiplier =
-    (studioSettings?.particleDensity ?? 1) * cymaticsRuntime.densityMultiplier;
+    (studioSettings?.particleDensity ??
+      sharedSourceSettings?.particleDensity ??
+      1) * cymaticsRuntime.densityMultiplier;
 
   internalTargetValueRef.current = value;
   internalOpacityRef.current = opacity;
@@ -491,9 +605,14 @@ export default function CymaticVisualizer({
   baseRedRef.current = studioSettings?.baseRed ?? 255;
   baseGreenRef.current = studioSettings?.baseGreen ?? 255;
   baseBlueRef.current = studioSettings?.baseBlue ?? 255;
-  nodePullRef.current = studioSettings?.nodePull ?? NODE_PULL_MIX;
-  hueShiftRef.current = studioSettings?.hueShift ?? HUE_SHIFT_MAX;
-  particleSizeRef.current = studioSettings?.particleSize ?? 1;
+  nodePullRef.current =
+    studioSettings?.nodePull ?? sharedSourceSettings?.nodePull ?? NODE_PULL_MIX;
+  hueShiftRef.current =
+    studioSettings?.hueShift ?? sharedSourceSettings?.hueShift ?? HUE_SHIFT_MAX;
+  particleSizeRef.current =
+    studioSettings?.particleSize ??
+    sharedSourceSettings?.particleSize ??
+    DEFAULT_PARTICLE_SIZE;
 
   useEffect(() => {
     const square = squareRef.current;
@@ -754,6 +873,30 @@ export default function CymaticVisualizer({
 
       let currentTexture = localSourceTexture;
       let writeToA = true;
+      const blurAmount =
+        sharedFxSettings?.blur.uniforms.blurAmount ?? 6.0;
+      const asciiPixelation =
+        sharedFxSettings?.ascii.uniforms.pixelation ?? ASCII_PIXELATION;
+      const asciiSaturation =
+        sharedFxSettings?.ascii.uniforms.saturation ?? ASCII_SATURATION;
+      const chromaticStrength =
+        sharedFxSettings?.chromatic.uniforms.strength ?? CHROMATIC_STRENGTH;
+      const glowStrength =
+        sharedFxSettings?.glow.uniforms.glowStrength ?? GLOW_STRENGTH;
+      const glowRadius =
+        sharedFxSettings?.glow.uniforms.glowRadius ?? GLOW_RADIUS;
+      const glowRadialStrength =
+        sharedFxSettings?.glow.uniforms.radialStrength ??
+        GLOW_RADIAL_STRENGTH;
+      const glowRadialFalloff =
+        sharedFxSettings?.glow.uniforms.radialFalloff ??
+        GLOW_RADIAL_FALLOFF;
+      const vignetteStrength =
+        sharedFxSettings?.vignette.uniforms.strength ?? VIGNETTE_STRENGTH;
+      const vignettePower =
+        sharedFxSettings?.vignette.uniforms.power ?? VIGNETTE_POWER;
+      const vignetteZoom =
+        sharedFxSettings?.vignette.uniforms.zoom ?? VIGNETTE_ZOOM;
 
       const renderPassToFbo = (
         program: WebGLProgram,
@@ -781,62 +924,56 @@ export default function CymaticVisualizer({
         writeToA = !writeToA;
       };
 
-      if (ENABLE_ASCII) {
+      if (asciiPassEnabled) {
         renderPassToFbo(
           localAsciiProgram,
           () => {
             gl.uniform1i(localAsciiUniforms.texture, 0);
             gl.uniform2f(localAsciiUniforms.resolution, renderW, renderH);
             gl.uniform2f(localAsciiUniforms.mouse, renderW * 0.5, renderH * 0.5);
-            gl.uniform1f(localAsciiUniforms.pixelation, ASCII_PIXELATION);
-            gl.uniform1f(localAsciiUniforms.saturation, ASCII_SATURATION);
+            gl.uniform1f(localAsciiUniforms.pixelation, asciiPixelation);
+            gl.uniform1f(localAsciiUniforms.saturation, asciiSaturation);
           },
           currentTexture
         );
       }
 
-      if (ENABLE_CHROMATIC) {
+      if (chromaticPassEnabled) {
         renderPassToFbo(
           localChromaticProgram,
           () => {
             gl.uniform1i(localChromaticUniforms.texture, 0);
             gl.uniform1f(localChromaticUniforms.time, 0);
             gl.uniform2f(localChromaticUniforms.resolution, renderW, renderH);
-            gl.uniform1f(localChromaticUniforms.strength, CHROMATIC_STRENGTH);
+            gl.uniform1f(localChromaticUniforms.strength, chromaticStrength);
           },
           currentTexture
         );
       }
 
-      if (ENABLE_RADIAL_GLOW) {
+      if (glowPassEnabled) {
         renderPassToFbo(
           localGlowProgram,
           () => {
             gl.uniform1i(localGlowUniforms.texture, 0);
             gl.uniform2f(localGlowUniforms.resolution, renderW, renderH);
-            gl.uniform1f(localGlowUniforms.glowStrength, GLOW_STRENGTH);
-            gl.uniform1f(localGlowUniforms.glowRadius, GLOW_RADIUS);
-            gl.uniform1f(
-              localGlowUniforms.radialStrength,
-              GLOW_RADIAL_STRENGTH
-            );
-            gl.uniform1f(
-              localGlowUniforms.radialFalloff,
-              GLOW_RADIAL_FALLOFF
-            );
+            gl.uniform1f(localGlowUniforms.glowStrength, glowStrength);
+            gl.uniform1f(localGlowUniforms.glowRadius, glowRadius);
+            gl.uniform1f(localGlowUniforms.radialStrength, glowRadialStrength);
+            gl.uniform1f(localGlowUniforms.radialFalloff, glowRadialFalloff);
           },
           currentTexture
         );
       }
 
-      if (ENABLE_HORIZONTAL_BLUR) {
+      if (blurPassEnabled) {
         renderPassToFbo(
           localBlurProgram,
           () => {
             gl.uniform1i(localBlurUniforms.texture, 0);
             gl.uniform2f(localBlurUniforms.resolution, renderW, renderH);
             gl.uniform2f(localBlurUniforms.direction, 1, 0);
-            gl.uniform1f(localBlurUniforms.blurAmount, 6.0);
+            gl.uniform1f(localBlurUniforms.blurAmount, blurAmount);
           },
           currentTexture
         );
@@ -847,20 +984,20 @@ export default function CymaticVisualizer({
             gl.uniform1i(localBlurUniforms.texture, 0);
             gl.uniform2f(localBlurUniforms.resolution, renderW, renderH);
             gl.uniform2f(localBlurUniforms.direction, 0, 1);
-            gl.uniform1f(localBlurUniforms.blurAmount, 6.0);
+            gl.uniform1f(localBlurUniforms.blurAmount, blurAmount);
           },
           currentTexture
         );
       }
 
-      if (ENABLE_VIGNETTE) {
+      if (vignettePassEnabled) {
         renderPassToFbo(
           localVignetteProgram,
           () => {
             gl.uniform1i(localVignetteUniforms.texture, 0);
-            gl.uniform1f(localVignetteUniforms.strength, VIGNETTE_STRENGTH);
-            gl.uniform1f(localVignetteUniforms.power, VIGNETTE_POWER);
-            gl.uniform1f(localVignetteUniforms.zoom, VIGNETTE_ZOOM);
+            gl.uniform1f(localVignetteUniforms.strength, vignetteStrength);
+            gl.uniform1f(localVignetteUniforms.power, vignettePower);
+            gl.uniform1f(localVignetteUniforms.zoom, vignetteZoom);
           },
           currentTexture
         );
@@ -1071,14 +1208,44 @@ export default function CymaticVisualizer({
             m: harmonicMRef.current,
           }
         : null;
-      const blendedField = customMode ? null : getBlend(simValueRef.current);
+      const homepageVariantBlend = customMode
+        ? null
+        : getAgentVariantBlend(simValueRef.current, agentVariants);
+      const blendedModes = customMode
+        ? null
+        : {
+            a: {
+              n: homepageVariantBlend!.a.harmonicN,
+              m: homepageVariantBlend!.a.harmonicM,
+            },
+            b: {
+              n: homepageVariantBlend!.b.harmonicN,
+              m: homepageVariantBlend!.b.harmonicM,
+            },
+            mix: homepageVariantBlend!.mix,
+          };
       const baseAgentColor = customMode
         ? {
             r: clamp(baseRedRef.current / 255, 0, 1),
             g: clamp(baseGreenRef.current / 255, 0, 1),
             b: clamp(baseBlueRef.current / 255, 0, 1),
           }
-        : getBlendedAgentColor(simValueRef.current);
+        : desaturateRgbPerceptual(
+            mixRgbPerceptual(
+              {
+                r: homepageVariantBlend!.a.baseRed / 255,
+                g: homepageVariantBlend!.a.baseGreen / 255,
+                b: homepageVariantBlend!.a.baseBlue / 255,
+              },
+              {
+                r: homepageVariantBlend!.b.baseRed / 255,
+                g: homepageVariantBlend!.b.baseGreen / 255,
+                b: homepageVariantBlend!.b.baseBlue / 255,
+              },
+              homepageVariantBlend!.mix
+            ),
+            getTransitionSaturation(homepageVariantBlend!.mix)
+          );
       const agentColor = baseAgentColor;
       const pulseLegacyBlend = customMode
         ? 0
@@ -1097,10 +1264,10 @@ export default function CymaticVisualizer({
               customMode,
               cymaticsRuntime.nodeProjectionSteps
             )
-          : projectTowardNode(
+          : projectTowardBlendedModes(
               particle.homeX,
               particle.homeY,
-              blendedField!,
+              blendedModes!,
               cymaticsRuntime.nodeProjectionSteps
             );
         const desiredX = lerp(particle.homeX, projection.x, nodePullRef.current);
@@ -1157,7 +1324,11 @@ export default function CymaticVisualizer({
 
         particle.energy = customMode
           ? fieldEnergyForMode(particle.x, particle.y, customMode)
-          : fieldEnergy(particle.x, particle.y, blendedField!);
+          : fieldEnergyForBlendedModes(
+              particle.x,
+              particle.y,
+              blendedModes!
+            );
       }
 
       if (profilerEnabled) {
@@ -1182,31 +1353,30 @@ export default function CymaticVisualizer({
           0,
           1
         );
-        const hueShiftAmount = hueShiftRef.current * Math.pow(radialDistance, 0.7);
-        // Shift hue directly — no "toward brighter" steering that distorts the dial
-        const shiftedColor = shiftHue(agentColor, hueShiftAmount);
-
-        // Normalize colorful hues into a stable lightness band, but preserve
-        // the native brightness of near-neutral colors so white stays white.
-        const normalizedColor = normalizeColorLightness(shiftedColor);
-        const saturatedColor = boostSaturation(
-          normalizedColor,
-          COLOR_SATURATION_BOOST
-        );
-
-        const colorStrength = lerp(
-          COLOR_MIN_STRENGTH,
-          COLOR_MAX_STRENGTH,
-          nodeCloseness
-        );
+        const hueShiftAmount = customMode
+          ? hueShiftRef.current * Math.pow(radialDistance, 0.7)
+          : 0;
+        const shiftedColor = customMode
+          ? shiftHue(agentColor, hueShiftAmount)
+          : agentColor;
+        const finalColor = customMode
+          ? boostSaturation(
+              normalizeColorLightness(shiftedColor),
+              COLOR_SATURATION_BOOST
+            )
+          : shiftedColor;
+        const colorStrength = customMode
+          ? lerp(COLOR_MIN_STRENGTH, COLOR_MAX_STRENGTH, nodeCloseness)
+          : 1;
+        const brightnessBoost = customMode ? COLOR_BRIGHTNESS_BOOST : 1;
         const r = Math.round(
-          clamp(saturatedColor.r * colorStrength * COLOR_BRIGHTNESS_BOOST, 0, 1) * 255
+          clamp(finalColor.r * colorStrength * brightnessBoost, 0, 1) * 255
         );
         const g = Math.round(
-          clamp(saturatedColor.g * colorStrength * COLOR_BRIGHTNESS_BOOST, 0, 1) * 255
+          clamp(finalColor.g * colorStrength * brightnessBoost, 0, 1) * 255
         );
         const b = Math.round(
-          clamp(saturatedColor.b * colorStrength * COLOR_BRIGHTNESS_BOOST, 0, 1) * 255
+          clamp(finalColor.b * colorStrength * brightnessBoost, 0, 1) * 255
         );
 
         ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;

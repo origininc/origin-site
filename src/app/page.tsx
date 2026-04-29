@@ -1,9 +1,20 @@
 "use client";
 
 import Boids from "@/components/Boids";
-import CymaticVisualizer from "@/components/CymaticVisualizer";
+import CymaticVisualizer, {
+  type CymaticAgentVariant,
+  type CymaticSharedPreset,
+} from "@/components/CymaticVisualizer";
+import GlassOrb from "@/components/GlassOrb";
 import SmoothScroll from "@/components/SmoothScroll";
 import { useCanvasRuntimeProfile } from "@/hooks/useCanvasRuntimeProfile";
+import {
+  desaturateRgbPerceptual,
+  getTransitionSaturation,
+  mixRgbPerceptual,
+  rgbUnitTo255,
+  type Rgb255,
+} from "@/lib/colorMix";
 import {
   isRuntimeProfilerEnabled,
   recordRuntimeMetric,
@@ -45,6 +56,7 @@ type ScrollVisualSnapshot = {
 };
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const ease = (value: number) => {
   const t = clamp01(value);
   return t * t * (3 - 2 * t);
@@ -59,7 +71,6 @@ const PIXELATE_LEVELS: readonly PixelateLevel[] = [
 const PIXELATE_OPACITY_DROP = 0.24;
 const PIXELATE_OPACITY_RAMP = 0.14;
 const BOIDS_SCALE = 1.5;
-const VISUALIZER_SHELL_OPACITY_FLOOR = 0.72;
 const HERO_ABOUT_IN_END = 0.58;
 const HERO_TITLE_RETURN_END = 0.26;
 const HERO_CONTENT_OFFSET = HERO_TITLE_RETURN_END;
@@ -83,6 +94,89 @@ const HERO_EXIT_START_SCROLL =
   HERO_EXIT_START +
   HERO_TITLE_FOCUS_EXTENSION +
   HERO_ABOUT_FOCUS_EXTENSION;
+const HOMEPAGE_CYMATIC_SHARED_PRESET: CymaticSharedPreset = {
+  sourceSettings: {
+    hueShift: 0,
+    nodePull: 1,
+    particleDensity: 2.42,
+    particleSize: 1.92,
+  },
+  fxSettings: {
+    presetId: "cymatics",
+    blur: {
+      enabled: true,
+      uniforms: {
+        blurAmount: 0.5,
+      },
+    },
+    ascii: {
+      enabled: true,
+      uniforms: {
+        pixelation: 0.5,
+        saturation: 1.7,
+      },
+    },
+    chromatic: {
+      enabled: false,
+      uniforms: {
+        strength: 0.002,
+      },
+    },
+    glow: {
+      enabled: true,
+      uniforms: {
+        glowStrength: 2.15,
+        glowRadius: 5.0,
+        radialStrength: 2.4,
+        radialFalloff: 1.45,
+      },
+    },
+    vignette: {
+      enabled: false,
+      uniforms: {
+        strength: 1.3,
+        power: 0.8,
+        zoom: 1.3,
+      },
+    },
+  },
+};
+const HOMEPAGE_CYMATIC_AGENT_VARIANTS: CymaticAgentVariant[] = [
+  {
+    baseBlue: 255,
+    baseGreen: 255,
+    baseRed: 255,
+    harmonicM: 4,
+    harmonicN: 5,
+  },
+  {
+    baseBlue: 184,
+    baseGreen: 206,
+    baseRed: 168,
+    harmonicM: 4,
+    harmonicN: 1,
+  },
+  {
+    baseBlue: 0,
+    baseGreen: 0,
+    baseRed: 255,
+    harmonicM: 5,
+    harmonicN: 1,
+  },
+  {
+    baseBlue: 255,
+    baseGreen: 112,
+    baseRed: 0,
+    harmonicM: 7,
+    harmonicN: 2,
+  },
+];
+const DEFAULT_ORB_TINTS: readonly Rgb255[] = [
+  { r: 255, g: 255, b: 255 },
+  { r: 168, g: 206, b: 184 },
+  { r: 255, g: 0, b: 0 },
+  { r: 0, g: 112, b: 255 },
+] as const;
 const HERO_SCROLL_SPACER_VH =
   2 + HERO_TITLE_FOCUS_EXTENSION + HERO_ABOUT_FOCUS_EXTENSION;
 const PLACEHOLDER_FADE_IN = 0.24;
@@ -159,9 +253,55 @@ const getVisualizerShellOpacity = (visibility: number) => {
     return 0;
   }
 
-  return (
-    VISUALIZER_SHELL_OPACITY_FLOOR +
-    (1 - VISUALIZER_SHELL_OPACITY_FLOOR) * active
+  return ease(active);
+};
+
+const getDefaultOrbTint = (index: number): Rgb255 =>
+  DEFAULT_ORB_TINTS[
+    Math.min(DEFAULT_ORB_TINTS.length - 1, Math.max(0, index))
+  ];
+
+const getOrbTint = (
+  value: number,
+  variants: readonly CymaticAgentVariant[]
+): Rgb255 => {
+  const count = Math.max(DEFAULT_ORB_TINTS.length, variants.length);
+  const clamped = Math.min(Math.max(value, 1), count);
+  const baseIndex = Math.min(count - 1, Math.max(0, Math.floor(clamped) - 1));
+  const nextIndex = Math.min(count - 1, baseIndex + 1);
+  const mix = nextIndex === baseIndex ? 0 : clamped - (baseIndex + 1);
+  const from = variants[baseIndex]
+    ? {
+        r: variants[baseIndex].baseRed,
+        g: variants[baseIndex].baseGreen,
+        b: variants[baseIndex].baseBlue,
+      }
+    : getDefaultOrbTint(baseIndex);
+  const to = variants[nextIndex]
+    ? {
+        r: variants[nextIndex].baseRed,
+        g: variants[nextIndex].baseGreen,
+        b: variants[nextIndex].baseBlue,
+      }
+    : getDefaultOrbTint(nextIndex);
+
+  return rgbUnitTo255(
+    desaturateRgbPerceptual(
+      mixRgbPerceptual(
+        {
+          r: from.r / 255,
+          g: from.g / 255,
+          b: from.b / 255,
+        },
+        {
+          r: to.r / 255,
+          g: to.g / 255,
+          b: to.b / 255,
+        },
+        mix
+      ),
+      getTransitionSaturation(mix)
+    )
   );
 };
 
@@ -343,6 +483,22 @@ export default function Home() {
       placeholderVisualizerShellRef.current.style.opacity = `${getVisualizerShellOpacity(
         visuals.visualizerOpacity
       )}`;
+      const orbTint = getOrbTint(
+        visuals.visualizerValue,
+        HOMEPAGE_CYMATIC_AGENT_VARIANTS
+      );
+      placeholderVisualizerShellRef.current.style.setProperty(
+        "--orb-tint-r",
+        `${Math.round(orbTint.r)}`
+      );
+      placeholderVisualizerShellRef.current.style.setProperty(
+        "--orb-tint-g",
+        `${Math.round(orbTint.g)}`
+      );
+      placeholderVisualizerShellRef.current.style.setProperty(
+        "--orb-tint-b",
+        `${Math.round(orbTint.b)}`
+      );
     }
 
     visuals.placeholderCards.forEach((card, index) => {
@@ -645,17 +801,44 @@ export default function Home() {
               opacity: getVisualizerShellOpacity(
                 INITIAL_SCROLL_VISUALS.visualizerOpacity
               ),
-            }}
+              "--orb-tint-r": `${Math.round(
+                getOrbTint(
+                  INITIAL_SCROLL_VISUALS.visualizerValue,
+                  HOMEPAGE_CYMATIC_AGENT_VARIANTS
+                ).r
+              )}`,
+              "--orb-tint-g": `${Math.round(
+                getOrbTint(
+                  INITIAL_SCROLL_VISUALS.visualizerValue,
+                  HOMEPAGE_CYMATIC_AGENT_VARIANTS
+                ).g
+              )}`,
+              "--orb-tint-b": `${Math.round(
+                getOrbTint(
+                  INITIAL_SCROLL_VISUALS.visualizerValue,
+                  HOMEPAGE_CYMATIC_AGENT_VARIANTS
+                ).b
+              )}`,
+            } as CSSProperties}
           >
-            <div className="placeholder-visualizer-orb">
+            <GlassOrb
+              className="placeholder-visualizer-orb"
+              contentClassName="placeholder-visualizer-inner"
+              tint={getOrbTint(
+                INITIAL_SCROLL_VISUALS.visualizerValue,
+                HOMEPAGE_CYMATIC_AGENT_VARIANTS
+              )}
+            >
               <CymaticVisualizer
+                agentVariants={HOMEPAGE_CYMATIC_AGENT_VARIANTS}
+                sharedPreset={HOMEPAGE_CYMATIC_SHARED_PRESET}
                 value={INITIAL_SCROLL_VISUALS.visualizerValue}
                 opacity={1}
                 opacityRefExternal={visualizerOpacityRef}
                 runtimeProfile={canvasRuntimeProfile}
                 valueRefExternal={visualizerValueRef}
               />
-            </div>
+            </GlassOrb>
           </div>
         </div>
 
@@ -768,70 +951,32 @@ export default function Home() {
               (var(--overlay-content-width) - var(--text-column-right)) / 2
           );
           transform: translate(-50%, -50%);
-          width: min(560px, calc(var(--visualizer-area-width) + 96px), 50vw);
+          width: min(520px, calc(var(--visualizer-area-width) + 64px), 46vw);
           display: flex;
           justify-content: center;
           align-items: center;
         }
 
         .placeholder-visualizer-orb {
-          position: relative;
           width: 100%;
-          aspect-ratio: 1 / 1;
-          border-radius: 50%;
-          overflow: hidden;
-          isolation: isolate;
-          border: 1px solid rgba(255, 255, 255, 0.12);
-          background: rgba(255, 255, 255, 0.03);
-          backdrop-filter: blur(12px);
-          -webkit-backdrop-filter: blur(12px);
-          box-shadow:
-            0 26px 80px rgba(0, 0, 0, 0.36),
-            inset 0 1px 0 rgba(255, 255, 255, 0.14),
-            inset 0 -28px 52px rgba(255, 255, 255, 0.035);
         }
 
-        .placeholder-visualizer-orb::before,
-        .placeholder-visualizer-orb::after {
-          content: "";
-          position: absolute;
-          inset: 0;
-          border-radius: inherit;
-          pointer-events: none;
-          z-index: 2;
-        }
-
-        .placeholder-visualizer-orb::before {
-          background:
-            radial-gradient(
-              circle at 34% 26%,
-              rgba(255, 255, 255, 0.18) 0,
-              rgba(255, 255, 255, 0.08) 20%,
-              rgba(255, 255, 255, 0.015) 42%,
-              rgba(255, 255, 255, 0) 62%
-            ),
-            linear-gradient(
-              180deg,
-              rgba(255, 255, 255, 0.08) 0%,
-              rgba(255, 255, 255, 0.025) 34%,
-              rgba(255, 255, 255, 0) 72%
-            );
-        }
-
-        .placeholder-visualizer-orb::after {
-          inset: 1px;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          box-shadow:
-            inset 0 0 36px rgba(255, 255, 255, 0.035),
-            inset 0 -36px 60px rgba(0, 0, 0, 0.14);
-        }
-
-        .placeholder-visualizer-orb :global(.root) {
+        .placeholder-visualizer-inner :global(.root) {
           width: 100%;
           height: 100%;
         }
 
-        .placeholder-visualizer-orb :global(.square) {
+        .placeholder-visualizer-inner {
+          width: 100%;
+          height: 100%;
+        }
+
+        .placeholder-visualizer-inner :global(.root) {
+          width: 100%;
+          height: 100%;
+        }
+
+        .placeholder-visualizer-inner :global(.square) {
           width: 100%;
           height: 100%;
         }
@@ -970,7 +1115,7 @@ export default function Home() {
             right: auto;
             bottom: 24px;
             left: 50%;
-            width: min(420px, calc(100vw - 48px));
+            width: min(388px, calc(100vw - 56px));
             transform: translateX(-50%);
           }
         }
